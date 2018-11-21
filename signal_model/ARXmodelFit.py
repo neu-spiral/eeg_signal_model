@@ -87,6 +87,7 @@ class ARXmodelfit(object):
         Q_inv_nonFRP = Ix
         Q_inv_FRP = Ix
         iter = 0
+        parameter = []
         X = []  # design matrix
         # Parameter estimation using cyclic decent method
         while abs(err - err_old) > self.threshold * abs(err_old):
@@ -141,7 +142,7 @@ class ARXmodelfit(object):
 
                 # updates the design matrix according to the target/non-target stimuli onsets
                 X.append(z.T)
-                y_s = data.eeg[self.ARorder:, s]
+                y_s = eeg[self.ARorder:, s]
 
                 # check the experiment paradigm
                 if self.paradigm == "FRP":
@@ -212,7 +213,7 @@ class ARXmodelfit(object):
                 beta_hat = np.divide(matX, matY)
 
             # Update Q_inv with a detrended V so arburg works well
-            Q_inv, d_vec, q = self.invCov(self, arProcess_hat[:], Ix, Ix)
+            Q_inv, D, q = self.invCov(self, arProcess_hat[:], Ix, Ix)
             # Estimate alpha and sigma2e with burg
             sigma_hat, ar_coeff = self.arburg(self, arProcess_hat[:])
             error = np.mean(err)
@@ -220,6 +221,27 @@ class ARXmodelfit(object):
             var_hat = sigma_hat
 
         alpha_hat = (-1)*ar_coeff[1:].T
+        if self.paradigm == "FRP":
+            parameter.append(np.concatenate((alpha_hat, beta_hat_pos, sigma_hat)))
+            parameter.append(np.concatenate((alpha_hat, beta_hat_neg, sigma_hat)))
+
+        if self.paradigm == "ERP":
+            parameter.append(np.concatenate((alpha_hat, beta_neg, sigma_hat)))
+
+        # Compute the loglikelihood
+        logdG = np.sum(np.log(D)) + N*np.log(sigma_hat)
+        loglikelihood = self.numSeq*logdG + error/sigma_hat
+        # Estimated EEG sequences based on the estiamted parameters
+        for s in range(self.numSeq):
+            s_tilde = eeg[:self.ARorder,s]
+            noise = np.sqrt(sigma_hat)*np.randn((self.numSamp,1))
+            s_hat[:self.ARorder] = noise[:self.ARorder]
+            for n in range(self.ARorder+1:self.numSamp):
+                s_hat[] =
+                s_tilde = np.concatenate()
+
+        #sig_hat = sig_hat
+        y_hat = sig_hat + s_hat
 
         return []
 
