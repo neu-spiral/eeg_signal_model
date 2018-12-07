@@ -55,9 +55,10 @@ class ARXmodelfit(object):
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
         # Initialization
-        auc_ch = np.zeros((nFold,len(self.channels)))
-        auc = np.zeros((nFold,1))
-        acc = np.zeros((nFold,1))
+        auc_ch = np.zeros((nFold, len(self.channels)))
+        auc = np.zeros((nFold, 1))
+        acc = np.zeros((nFold, 1))
+        parameter_hat = np.zeros((nFold, len(self.channels)))
         parameter_ = []
         trialTargetness = []
         score = []
@@ -87,12 +88,12 @@ class ARXmodelfit(object):
                                                                   data, nFold)
             # Parameters estimation for each channel/brain sources
             for ch in range(len(self.channels)):
-                bic = []
-                hyperparameters = []
-                error = []
-                auc = []
                 if orderSelection:
+                    bic = []
                     for k in AR_range:
+                        hyperparameters = []
+                        error = []
+                        auc = []
                         for tau0 in tau0_range:
                             for tau1 in tau1_range:
                                 for tau2 in tau2_range:
@@ -110,55 +111,63 @@ class ARXmodelfit(object):
                                                                  data_train, ch)
                                                 auc_, _ = self.model_eval(self,
                                                                 parameter_hat,
-                                                                data_test, ch,
-                                                                nParam)
+                                                                data_test, ch)
                                                 parameter, loglike, sigma_hat, \
                                                 _ = self.cyclic_decent_method(self,
                                                                  data_test, ch)
-                                                bic.append(loglike +
-                                                k*np.log(self.numSeq*(
-                                                        self.numSeq - k)))
                                                 hyperparameters.append([k,
                                                                         self.tau,
                                                     self.delays, self.compOrder])
                                                 error.append(sigma_hat)
                                                 auc.append(auc_)
-                    # Find the optimal ARorder, tau, dealy, and compOrder according to AUC
-                    indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
-                    indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
+                        # Find the optimal ARorder, tau, delay, and compOrder according to AUC
+                        indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
+                        indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
+                        self.tau = hyperparameters[indx1[indx2]][1]
+                        self.delay = hyperparameters[indx1[indx2]][2]
+                        self.compOrder = hyperparameters[indx1[indx2]][3]
+                        hyperparameters = []
+                        hyperparameters.append([k, self.tau, self.delays,
+                                                self.compOrder])
+                        nParam = [k, k + sum(self.compOrder),
+                                  k + sum(self.compOrder) + 1]
+                        _, L, _ = self.cyclic_decent_method(self, data_train, ch)
+                        # Compute BIC measure for AR model order selection
+                        bic.append(L + k*np.log(self.numSeq*(self.numSeq - k)))
 
-                    self.ARorder =
-                    self.tau =
-                    self.delays =
-
+                    indx = [i for i in range(len(bic)) if bic[i] == min(bic)]
+                    self.ARorder = AR_range[indx]
+                    self.tau = hyperparameters[indx][1]
+                    self.delays = hyperparameters[indx][2]
+                    self.compOrder = hyperparameters[indx][3]
 
                 nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
-            for ch in range(len(self.channels)):
-                parameter_hat, _ = self.cyclic_decent_method(self,
+                parameter_hat[f,ch], _ = self.cyclic_decent_method(self,
                                                              data_train, ch)
-                auc_ch[f,ch], acc_ch, score, trialTargetness_ch = \
-                    self.model_eval(self, parameter_hat, data_test, ch, nParam)
+                auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
+                    self.model_eval(self, parameter_hat[f,ch], data_test, ch)
                 score.append(score_)
                 trialTargetness.append(trialTargetness_ch)
 
             data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
-            auc[f], acc[f], _ = \
-                self.model_eval(self, parameter_hat, data_test, ch, nParam)
+            auc[f], acc[f], _ = self.model_eval(self, parameter_hat[f, :],
+                                         data_test, self.channels)
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
             # Set current status
-            prog.set_stat(i + 1)
+            prog.set_stat(f + 1)
             # Update Progress Bar again
             prog.update()
 
         # Make the Progress Bar final
         prog.end()
+        # Pick best parameters for each channel/brain source
         for ch in range(len(self.channels)):
-            best_ind = [i for i in range(nFold) if auc_ch[:,ch] == max(auc_ch[:,ch])]
-            parameters = parameter_[best_ind]
+            best_ind = [i for i in range(nFold) if auc_ch[:, ch] == max(auc_ch[:, ch])]
+            parameters = parameter_hat[best_ind, ch]
 
-        return []
+        return auc, acc, parameters
 
     def data_for_corssValidation(self, data, nFold = 10):
 
@@ -262,6 +271,7 @@ class ARXmodelfit(object):
                 len_query(int): number of queries in the scheduled query
             Return:
                 query(list[str]): queries """
+        
 
         return []
 
