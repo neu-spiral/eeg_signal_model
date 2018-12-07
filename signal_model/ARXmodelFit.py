@@ -1,6 +1,7 @@
 import numpy as np
 import warnings
 from copy import copy
+import pyprog
 
 
 class ARXmodelfit(object):
@@ -36,9 +37,9 @@ class ARXmodelfit(object):
         self.numSeq = numSeq
         self.numTrial = numTrial
         self.ARorder = hyperparameter[0]
-        self.tau = hyperparameter[]
-        self.delays = hyperparameter[]
-        self.comOrder = hyperparameter[]
+        self.tau = hyperparameter[1]
+        self.delays = hyperparameter[2]
+        self.comOrder = hyperparameter[3]
         self.threshold = threshold
 
 
@@ -50,15 +51,9 @@ class ARXmodelfit(object):
                 len_query(int): number of queries in the scheduled query
             Return:
                 query(list[str]): queries """
-        foldSampSize = np.floor(self.numSamp/nFold)
         eeg = data["timeseries"]
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
-        # shuffling data set
-        indx = np.random.permutation(self.numSeq)
-        eeg_sh = eeg[:,:,indx]
-        trigOnsets_sh = trigOnsets[:,indx]
-        targetOnsets_sh = targetOnsets[:,indx]
         # Initialization
         auc_ch = np.zeros((nFold,len(self.channels)))
         auc = np.zeros((nFold,1))
@@ -67,87 +62,77 @@ class ARXmodelfit(object):
         trialTargetness = []
         score = []
 
-        if self.paradigm == "FRP":
-            ind_frp_neg = [i for i in range(self.numSeq) if targetOnsets_sh[i] > 0]
-            ind_frp_pos = [i for i in range(self.numSeq) if targetOnsets_sh[i] == 0]
-            y_train_pos = eeg_sh[:,:,ind_frp_pos]
-            y_train_neg = eeg_sh[:,:,ind_frp_neg]
-            us_train_pos = trigOnsets_sh[:,ind_frp_pos]
-            us_train_neg = trigOnsets_sh[:,ind_frp_neg]
-            ue_train_pos = targetOnsets_sh[ind_frp_pos]
-            ue_train_neg = targetOnsets_sh[ind_frp_neg]
-        else:
-            y_train = copy(eeg_sh)
-            us_train = copy(trigOnsets_sh)
-            ue_train = copy(targetOnsets_sh)
 
         # Time resolution for delays in grid search for model order selection
         if orderSelection:
-           dD = np.round(.005*float(self.fs))
+            dD = np.round(.005*float(self.fs))
+            delay0 = [self.delays[0][0]+dD for i in
+                      range((self.delays[0][1] - self.delays[0][0])*dD+1)]
+            delay1 = [self.delays[1][0]+dD for i in
+                      range((self.delays[1][1] - self.delays[1][0])*dD+1)]
+            delay2 = [self.delays[2][0]+dD for i in
+                      range((self.delays[2][1] - self.delays[2][0])*dD+1)]
+            AR_range = range(self.ARorder[0],self.ARorder[1]+1)
+            tau0_range = range(self.tau[0][0],self.tau[0][1]+1)
+            tau1_range = range(self.tau[1][0],self.tau[1][1]+1)
+            tau2_range = range(self.tau[2][0],self.tau[2][1]+1)
 
         # training the model within K-fold cross validation
+        # Create Object
+        prog = pyprog.ProgressBar(" ", "", 34)
+        # Update Progress Bar
+        prog.update()
         for f in range(nFold):
-            # This means you have only one fold and do want to cross validate
-            if foldSampSize >= self.numSeq:
-                if self.paradigm == "FRP":
-                    y_test_pos = copy(y_train_pos)
-                    y_test_neg = copy(y_train_neg)
-                    us_test_pos = copy(us_train_pos)
-                    us_test_neg = copy(us_train_neg)
-                    ue_test_pos = copy(ue_train_pos)
-                    ue_test_neg = copy(ue_train_neg)
-                else:
-                    y_test = copy(y_train)
-                    us_test = copy(us_train)
-                    ue_test = copy(ue_train)
-            else:
-                print("Fold: ".format(f))
-                if self.paradigm == "FRP":
-                    testIndx = range(f*np.floor(foldSampSize/2),
-                                            (f+1)*np.floor(foldSampSize/2)+1)
-                    testIndx_pos = min(len(ind_frp_pos), len(testIndx))
-                    testIndx_neg = min(len(ind_frp_neg), len(testIndx))
-                    y_test_pos = copy(y_train_pos[:,:,testIndx_pos])
-                    y_test_neg = copy(y_train_neg[:,:,testIndx_neg])
-                    us_test_pos = copy(us_train_pos[:,testIndx_pos])
-                    us_test_neg = copy(us_train_neg[:,testIndx_neg])
-                    ue_test_pos = copy(ue_train_pos[testIndx_pos])
-                    ue_test_neg = copy(ue_train_neg[testIndx_neg])
-                    y_test = np.concatenate((y_test_pos,y_test_neg),2)
-                    us_test = np.concatenate((us_test_pos,us_test_neg),1)
-                    ue_tes = np.concatenate((ue_test_pos,ue_test_neg))
-                    y_train_pos = np.delet(y_train_pos, testIndx_pos, 2)
-                    y_train_neg = np.delet(y_train_neg, testIndx_neg, 2)
-                    us_train_pos = np.delet(us_train_pos, testIndx_pos, 1)
-                    us_train_neg = np.delet(us_train_neg, testIndx_neg, 1)
-                    ue_train_pos = np.delet(ue_train_pos, testIndx_pos, 0)
-                    ue_train_neg = np.delet(ue_train_neg, testIndx_neg, 0)
-                    y_train = np.concatenate((y_train_pos,y_train_neg),2)
-                    us_train = np.concatenate((us_train_pos,us_train_neg),1)
-                    ue_train = np.concatenate((ue_train_pos,ue_train_neg))
+            data_train, data_test = self.data_for_corssValidation(self,
+                                                                  data, nFold)
+            # Parameters estimation for each channel/brain sources
+            for ch in range(len(self.channels)):
+                bic = []
+                hyperparameters = []
+                error = []
+                auc = []
+                if orderSelection:
+                    for k in AR_range:
+                        for tau0 in tau0_range:
+                            for tau1 in tau1_range:
+                                for tau2 in tau2_range:
+                                    for d0 in delay0:
+                                        for d1 in delay1:
+                                            for d2 in delay2:
+                                                nParam = [k,
+                                                          k+sum(self.compOrder),
+                                                          k+sum(self.compOrder)+1]
+                                                self.ARorder = k
+                                                self.tau = [tau0, tau1, tau2]
+                                                self.delays = [d0, d1, d2]
+                                                parameter_hat, _ = \
+                                                self.cyclic_decent_method(self,
+                                                                 data_train, ch)
+                                                auc_, _ = self.model_eval(self,
+                                                                parameter_hat,
+                                                                data_test, ch,
+                                                                nParam)
+                                                parameter, loglike, sigma_hat, \
+                                                _ = self.cyclic_decent_method(self,
+                                                                 data_test, ch)
+                                                bic.append(loglike +
+                                                k*np.log(self.numSeq*(
+                                                        self.numSeq - k)))
+                                                hyperparameters.append([k,
+                                                                        self.tau,
+                                                    self.delays, self.compOrder])
+                                                error.append(sigma_hat)
+                                                auc.append(auc_)
+                    # Find the optimal ARorder, tau, dealy, and compOrder according to AUC
+                    indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
+                    indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
 
-                else:
-                    testIndx = range(f*np.floor(foldSampSize),(f+1)*np.floor(foldSampSize)+1)
-                    y_test = copy(y_train[:,:,testIndx])
-                    us_test = copy(us_train[:,testIndx])
-                    ue_test = copy(ue_train[testIndx])
-                    y_train = np.delet(y_train, testIndx, 1)
-                    us_train = np.delet(us_train, testIndx, 1)
-                    ue_train = np.delet(ue_train, testIndx, 0)
-
-            data_train = {"timeseries":y_train, "stimOnset":us_train, "targetOnset":ue_train}
-            data_test = {"timeseries":y_test, "stimOnset":us_test, "targetOnset":ue_test}
-            # Parameters estimation
-            if orderSelection:
-
-                self.ARorder =
-                self.tau =
-                self.delays =
-                self.comOrder =
+                    self.ARorder =
+                    self.tau =
+                    self.delays =
 
 
-
-            nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
+                nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
             for ch in range(len(self.channels)):
                 parameter_hat, _ = self.cyclic_decent_method(self,
@@ -161,12 +146,112 @@ class ARXmodelfit(object):
             auc[f], acc[f], _ = \
                 self.model_eval(self, parameter_hat, data_test, ch, nParam)
 
-            print("AUC:  | ACC: ".format(auc[f], acc[f]))
-            for ch in range(len(self.channels)):
-                best_ind = [i for i in range(nFold) if auc_ch[:,ch] == max(auc_ch[:,ch])]
-                parameters = parameter_[best_ind]
+            #print("AUC:  | ACC: ".format(auc[f], acc[f]))
+            # Set current status
+            prog.set_stat(i + 1)
+            # Update Progress Bar again
+            prog.update()
+
+        # Make the Progress Bar final
+        prog.end()
+        for ch in range(len(self.channels)):
+            best_ind = [i for i in range(nFold) if auc_ch[:,ch] == max(auc_ch[:,ch])]
+            parameters = parameter_[best_ind]
 
         return []
+
+    def data_for_corssValidation(self, data, nFold = 10):
+
+        foldSampSize = np.floor(self.numSamp/nFold)
+        eeg = data["timeseries"]
+        trigOnsets = data["stimOnset"]
+        targetOnsets = data["targetOnset"]
+        # shuffling data set
+        indx = np.random.permutation(self.numSeq)
+        eeg_sh = eeg[:,:,indx]
+        trigOnsets_sh = trigOnsets[:,indx]
+        targetOnsets_sh = targetOnsets[:,indx]
+        y_train =[]
+        y_test = []
+        us_train = []
+        us_test = []
+        ue_train = []
+        ue_test = []
+
+        if self.paradigm == "FRP":
+            ind_frp_neg = [i for i in range(self.numSeq) if targetOnsets_sh[i] > 0]
+            ind_frp_pos = [i for i in range(self.numSeq) if targetOnsets_sh[i] == 0]
+            y_train_pos = eeg_sh[:,:,ind_frp_pos]
+            y_train_neg = eeg_sh[:,:,ind_frp_neg]
+            us_train_pos = trigOnsets_sh[:,ind_frp_pos]
+            us_train_neg = trigOnsets_sh[:,ind_frp_neg]
+            ue_train_pos = targetOnsets_sh[ind_frp_pos]
+            ue_train_neg = targetOnsets_sh[ind_frp_neg]
+        else:
+            y_train_ = copy(eeg_sh)
+            us_train_ = copy(trigOnsets_sh)
+            ue_train_ = copy(targetOnsets_sh)
+
+        # training the model within K-fold cross validation
+        for f in range(nFold):
+            # This means you have only one fold and do want to cross validate
+            if foldSampSize >= self.numSeq:
+                if self.paradigm == "FRP":
+                    y_test_pos = copy(y_train_pos)
+                    y_test_neg = copy(y_train_neg)
+                    us_test_pos = copy(us_train_pos)
+                    us_test_neg = copy(us_train_neg)
+                    ue_test_pos = copy(ue_train_pos)
+                    ue_test_neg = copy(ue_train_neg)
+                    y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
+                    us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
+                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
+                    y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
+                    us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
+                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
+                else:
+                    y_test.append(y_train_)
+                    us_test.append(us_train_)
+                    ue_test.append(ue_train_)
+            else:
+                if self.paradigm == "FRP":
+                    testIndx = range(f*np.floor(foldSampSize/2),
+                                            (f+1)*np.floor(foldSampSize/2)+1)
+                    testIndx_pos = min(len(ind_frp_pos), len(testIndx))
+                    testIndx_neg = min(len(ind_frp_neg), len(testIndx))
+                    y_test_pos = copy(y_train_pos[:,:,testIndx_pos])
+                    y_test_neg = copy(y_train_neg[:,:,testIndx_neg])
+                    us_test_pos = copy(us_train_pos[:,testIndx_pos])
+                    us_test_neg = copy(us_train_neg[:,testIndx_neg])
+                    ue_test_pos = copy(ue_train_pos[testIndx_pos])
+                    ue_test_neg = copy(ue_train_neg[testIndx_neg])
+                    y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
+                    us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
+                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
+                    y_train_pos = np.delet(y_train_pos, testIndx_pos, 2)
+                    y_train_neg = np.delet(y_train_neg, testIndx_neg, 2)
+                    us_train_pos = np.delet(us_train_pos, testIndx_pos, 1)
+                    us_train_neg = np.delet(us_train_neg, testIndx_neg, 1)
+                    ue_train_pos = np.delet(ue_train_pos, testIndx_pos, 0)
+                    ue_train_neg = np.delet(ue_train_neg, testIndx_neg, 0)
+                    y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
+                    us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
+                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
+                else:
+                    testIndx = range(f*np.floor(foldSampSize),
+                                     (f+1)*np.floor(foldSampSize)+1)
+                    y_test.append(y_train_[:,:,testIndx])
+                    us_test.append(us_train_[:,testIndx])
+                    ue_test.append(ue_train_[testIndx])
+                    y_train.append(np.delet(y_train_, testIndx, 1))
+                    us_train.append(np.delet(us_train_, testIndx, 1))
+                    ue_train.append(np.delet(ue_train_, testIndx, 0))
+
+            data_train = {"timeseries":y_train, "stimOnset":us_train,
+                          "targetOnset":ue_train}
+            data_test = {"timeseries":y_test, "stimOnset":us_test,
+                         "targetOnset":ue_test}
+            return data_train, data_test
 
 
     def model_eval(self, parameter, data, channel):
@@ -193,7 +278,7 @@ class ARXmodelfit(object):
             Return:
                 query(list[str]): queries """
         # Initialization
-        eeg = data["timeseries"][ch,:,:]
+        eeg = data["timeseries"][channel,:,:]
         trigOnsets = data["stimOnset"]
         N = self.numSamp - self.ARorder
         Ix = np.identity(N)
