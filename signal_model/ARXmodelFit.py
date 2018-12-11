@@ -43,14 +43,21 @@ class ARXmodelfit(object):
         self.threshold = threshold
 
 
-    def ARXmodelfit(self, data, nFold = 10, orderSelection = False, saveResults = False):
-        """ with the final belief over the system, updates the querying method and
-            generates len_query most likely queries.
-            Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+    def ARXmodelfit(self, data, nFold = 10, orderSelection = False):
+        """
+        fits an ARX model to the multi-channel/ brain sources timeseries signal
+        using the cyclic decent method
+            Input Args:
+                data: a dictionary including timeseries, onsets of stimuli,
+                        and targets for all sequences
+                nFold: number of folds(int)
+                orderSelection: True if you want to set hyperparmeters by BIC
+                                and grid search (boolean)
             Return:
-                query(list[str]): queries """
+                auc: AUC of the classifier at each fold (nFold x 1)
+                acc: accuracy of the classifier at each fold (nFold x 1)
+                parameters: best parameters for each channel/brain sources
+        """
         eeg = data["timeseries"]
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
@@ -62,7 +69,6 @@ class ARXmodelfit(object):
         parameter_ = []
         trialTargetness = []
         score = []
-
 
         # Time resolution for delays in grid search for model order selection
         if orderSelection:
@@ -79,14 +85,15 @@ class ARXmodelfit(object):
             tau2_range = range(self.tau[2][0],self.tau[2][1]+1)
 
         # training the model within K-fold cross validation
+        data_train, data_test = self.data_for_corssValidation(self, data, nFold)
         # Create Object
         prog = pyprog.ProgressBar(" ", "", 34)
         # Update Progress Bar
         prog.update()
         for f in range(nFold):
-            data_train, data_test = self.data_for_corssValidation(self,
-                                                                  data, nFold)
             # Parameters estimation for each channel/brain sources
+            numSeq_train = data_train[f]["numSeq"]
+            numSeq_test = data_test[f]["numSeq"]
             for ch in range(len(self.channels)):
                 if orderSelection:
                     bic = []
@@ -106,15 +113,16 @@ class ARXmodelfit(object):
                                                 self.ARorder = k
                                                 self.tau = [tau0, tau1, tau2]
                                                 self.delays = [d0, d1, d2]
+                                                self.numSeq
                                                 parameter_hat, _ = \
                                                 self.cyclic_decent_method(self,
-                                                                 data_train, ch)
+                                                                 data_train[f], ch)
                                                 auc_, _ = self.model_eval(self,
                                                                 parameter_hat,
-                                                                data_test, ch)
+                                                                data_test[f], ch)
                                                 parameter, loglike, sigma_hat, \
                                                 _ = self.cyclic_decent_method(self,
-                                                                 data_test, ch)
+                                                                 data_test[f], ch)
                                                 hyperparameters.append([k,
                                                                         self.tau,
                                                     self.delays, self.compOrder])
@@ -131,9 +139,9 @@ class ARXmodelfit(object):
                                                 self.compOrder])
                         nParam = [k, k + sum(self.compOrder),
                                   k + sum(self.compOrder) + 1]
-                        _, L, _ = self.cyclic_decent_method(self, data_train, ch)
+                        _, L, _ = self.cyclic_decent_method(self, data_test[f], ch)
                         # Compute BIC measure for AR model order selection
-                        bic.append(L + k*np.log(self.numSeq*(self.numSeq - k)))
+                        bic.append(L + k*np.log(numSeq_train*(numSeq_test - k)))
 
                     indx = [i for i in range(len(bic)) if bic[i] == min(bic)]
                     self.ARorder = AR_range[indx]
@@ -144,7 +152,7 @@ class ARXmodelfit(object):
                 nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
                 parameter_hat[f,ch], _ = self.cyclic_decent_method(self,
-                                                             data_train, ch)
+                                                             data_train[f], ch)
                 auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
                     self.model_eval(self, parameter_hat[f,ch], data_test, ch)
                 score.append(score_)
@@ -152,7 +160,7 @@ class ARXmodelfit(object):
 
             data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
             auc[f], acc[f], _ = self.model_eval(self, parameter_hat[f, :],
-                                         data_test, self.channels)
+                                         data_test[f], self.channels)
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
             # Set current status
@@ -170,17 +178,31 @@ class ARXmodelfit(object):
         return auc, acc, parameters
 
     def data_for_corssValidation(self, data, nFold = 10):
-
+        """
+        Generates K dictionary dataset for cross validation
+            Input Args:
+                data: a dictionary including timeseries, onsets of stimuli,
+                        and targets for all sequences
+                nFold: number of folds(int)
+            Return:
+                data_train: a dictionary including timeseries, onsets of stimuli,
+                            targets, and number of samples for training in K folds
+                data_test: a dictionary including timeseries, onsets of stimuli,
+                            targets, and number of samples for test in K folds
+        """
+        # Initilization
         foldSampSize = np.floor(self.numSamp/nFold)
         eeg = data["timeseries"]
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
+        data_train = np.zeros((nFold, 1))
+        data_test = np.zeros((nFold, 1))
         # shuffling data set
         indx = np.random.permutation(self.numSeq)
         eeg_sh = eeg[:,:,indx]
         trigOnsets_sh = trigOnsets[:,indx]
         targetOnsets_sh = targetOnsets[:,indx]
-        y_train =[]
+        y_train = []
         y_test = []
         us_train = []
         us_test = []
@@ -256,24 +278,100 @@ class ARXmodelfit(object):
                     us_train.append(np.delet(us_train_, testIndx, 1))
                     ue_train.append(np.delet(ue_train_, testIndx, 0))
 
-            data_train = {"timeseries":y_train, "stimOnset":us_train,
-                          "targetOnset":ue_train}
-            data_test = {"timeseries":y_test, "stimOnset":us_test,
-                         "targetOnset":ue_test}
-            return data_train, data_test
+            data_train[f] = {"timeseries":y_train, "stimOnset":us_train,
+                          "targetOnset":ue_train, "numSeq":len(ue_train)}
+            data_test[f] = {"timeseries":y_test, "stimOnset":us_test,
+                         "targetOnset":ue_test, "numSeq":len(ue_test)}
+
+        return data_train, data_test
 
 
     def model_eval(self, parameter, data, channel):
-        """ with the final belief over the system, updates the querying method and
-            generates len_query most likely queries.
-            Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+        """
+        with the final belief over the system, updates the querying method and
+        generates len_query most likely queries.
+            Input Args:
+                parameters: model parameters for each channel/brain sources
+                data: a dictionary including timeseries, onsets of stimuli,
+                    and targets for all sequences
+                channel: set of channels/brain sources (int)
             Return:
-                query(list[str]): queries """
-        
+                auc: AUC of the classifier
+                acc: accuracy of the classifier
+                scores: loglikelihood scores of of all trials
+                trialTargetness: represents targetness of each trial across all sequences
+        """
+        numSeq = data["numSeq"]
+        y = data["timeseries"]
+        us = data["stimOnset"]
+        ue = data["targetOnset"]
+        coeff = data["coeff"]
+        # Initialization
+        label = np.zeros((numSeq,1))
+        sc = np.zeros((len(channel), numSeq))
+        score = np.zeros((len(channel), numSeq*(self.numTrial+1)))
+        if self.paradigm == "FRP":
+            loglikelihood = np.zeros((numSeq, 2, len(channel)))
+            trialTargetness = np.zeros((numSeq, 2))
+        else:
+            loglikelihood = np.zeros((numSeq, self.numTrial, len(channel)))
+            trialTargetness = np.zeros((numSeq, self.numTrial))
+        # Computing loglikehood scores for each possible target location
+        for seq in range(numSeq):
+            if self.paradigm == "FRP":
+                if us[seq] > 0:
+                    label[seq] = 1
+                    trialTargetness[seq,1] = 1
+                    trialTargetness[seq,0] = 0
+                else:
+                    label[seq] = 0
+                    trialTargetness[seq,1] = 0
+                    trialTargetness[seq,0] = 1
 
-        return []
+                loglikelihood[seq,0,:] = self.loglikelihoodARX(self, y[:,:,seq],
+                                                      us[:,seq], 0, parameter)
+                loglikelihood[seq,1,:] = self.loglikelihoodARX(self, y[:,:,seq],
+                                                      us[:,seq], us[:,seq],
+                                                               parameter)
+            else:
+                targetLoc = ue[seq]
+                possibleTarget = np.concatenate(([0], us[:,seq]))
+                for trial in range(self.numTrial):
+                    if np.abs(possibleTarget[trial] - targetLoc) < 3:
+                        label[seq] = trial + 1
+                        trialTargetness[seq,trial] = 1
+                    else:
+                        trialTargetness[seq,trial] = 0
+                    loglikelihood[seq,trial,:] = self.loglikelihoodARX(self,
+                                             y[:,:,seq], us[:,seq],
+                                            possibleTarget[trial], parameter)
+        # Computing auc and acc of the classifier
+        if self.paradigm == "FRP":
+            for ch in range(len(channel)):
+                sc[ch,:] = np.matmul(np.array([[-1,1]]), (-1)*loglikelihood[:,:,ch].T)
+
+            # combining multi-channels/brain sources
+            scores = np.matmul(coeff.T, sc)
+            auc = self.calculateAUC(scores, label)
+            acc = self.calculateACC(scores, label)
+            trialTargetness = label
+
+        else:
+            for ch in range(len(channel)):
+                ss = (-1)*loglikelihood[:,:,ch]
+                for seq in range(numSeq):
+                    sc[seq,:] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
+                    sc[seq, sc[seq,:] ==0] = (-1)*np.mean(sc[seq, sc[seq,:]!=0])
+
+                score[ch,:] = np.reshape(sc,1,(self.numTrial+1)*numSeq)
+            scores = np.matmul(coeff.T, score)
+            t_target = np.reshape(trialTargetness,1,(self.numTrial+1)*numSeq)
+            auc = self.calculateAUC(scores, t_target)
+            acc = self.calculateACC(scores, t_target)
+            trialTargetness = []
+            trialTargetness = t_target
+
+        return auc, acc, scores, trialTargetness
 
     def cyclic_decent_method(self, data, channel):
         """
@@ -282,7 +380,7 @@ class ARXmodelfit(object):
             - W. Q. Malik, et al., Denoising two-photon calcium imaging data, PloS one, 2011.
             - Y. M. Marghi, et al., A Parametric EEG Signal Model for BCIs with Rapid-Trial Sequences, EMBC, 2018.
 
-            Args:
+            Input Args:
                 p(list[float]): list of probability distribution over the state estimates
                 len_query(int): number of queries in the scheduled query
             Return:
@@ -481,7 +579,7 @@ class ARXmodelfit(object):
 
         for more information, please check equation (4) in "A Parametric EEG Signal Model for BCIs with Rapid-Trial
         Sequences" paper.
-            Args:
+            Input Args:
                 x: is Nx1
             Return:
                 y_gamma: an array including the value of gamma function
@@ -524,7 +622,7 @@ class ARXmodelfit(object):
         """
         Calculate inverse of AR covariance matrix via LDR V is NXps ensemble of  residuals, Linv & Winv are
         initialized to I_N
-            Args:
+            Input Args:
                 x: is Nx1
                 L_invt:
                 w_inv:
@@ -569,11 +667,11 @@ class ARXmodelfit(object):
 
         return w_inv, d_vec, q
 
-    def loglikelihood(self, p):
+    def loglikelihoodARX(self, p):
         """
         with the final belief over the system, updates the querying method and
         generates len_query most likely queries.
-            Args:
+            Input Args:
                 p(list[float]): list of probability distribution over the state estimates
                 len_query(int): number of queries in the scheduled query
             Return:
@@ -595,7 +693,7 @@ class ARXmodelfit(object):
 
         [A,E,K] = ARBURG(...) returns the reflection coefficients (parcor
         coefficients) in each column of K.
-            Args:
+            Input Args:
                 x: is Nx1
             Return:
                 err: final prediction error (estimated white noise variance)
@@ -638,7 +736,7 @@ class ARXmodelfit(object):
     def arburg_(self, x):
         """
         This function Vectorized AR parameter estimation via Burg method
-            Args:
+            Input Args:
                 x: is Nx1
             Return:
                 err: final prediction error (estimated white noise variance)
@@ -682,13 +780,30 @@ class ARXmodelfit(object):
 
         return err, b
 
-    def auc(self, p):
-        """ with the final belief over the system, updates the querying method and
+    def calculateAUC(self, p):
+        """
+        with the final belief over the system, updates the querying method and
             generates len_query most likely queries.
-            Args:
+            Input Args:
                 p(list[float]): list of probability distribution over the state estimates
                 len_query(int): number of queries in the scheduled query
             Return:
-                query(list[str]): queries """
+                query(list[str]): queries
+        """
 
         return []
+
+    def calculateACC(self, p):
+        """
+        with the final belief over the system, updates the querying method and
+            generates len_query most likely queries.
+            Input Args:
+                p(list[float]): list of probability distribution over the state estimates
+                len_query(int): number of queries in the scheduled query
+            Return:
+                query(list[str]): queries
+
+        """
+
+        return []
+
