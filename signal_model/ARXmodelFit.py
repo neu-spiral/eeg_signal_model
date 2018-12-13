@@ -1,6 +1,7 @@
 import numpy as np
 import warnings
 from copy import copy
+from sklearn import metrics
 import pyprog
 
 
@@ -381,13 +382,22 @@ class ARXmodelfit(object):
             - Y. M. Marghi, et al., A Parametric EEG Signal Model for BCIs with Rapid-Trial Sequences, EMBC, 2018.
 
             Input Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+                data: a dictionary including timeseries, onsets of stimuli,
+                    and targets for all sequences
+                channel: set of channels/brain sources (int)
             Return:
-                query(list[str]): queries """
+                parameter: estimated parameters fpr the ARX model including AR parameters, gammafunction
+                
+                loglikelihood:
+                sigma_hat:
+                y_hat:
+                signal_hat:
+                s_hat:
+        """
         # Initialization
         eeg = data["timeseries"][channel,:,:]
         trigOnsets = data["stimOnset"]
+        numSeq = data["numSeq"]
         N = self.numSamp - self.ARorder
         Ix = np.identity(N)
         err, b = self.arburg(self, eeg[:, 0])
@@ -398,14 +408,14 @@ class ARXmodelfit(object):
         Q_inv_FRP = copy(Ix)
         iter = 0
         parameter = []
-        s_hat = np.zeros((self.numSamp, self.numSeq))
+        s_hat = np.zeros((self.numSamp, numSeq))
         X = []  # design matrix
         # Parameter estimation using cyclic decent method
         while abs(var_hat - var_hat_old) > self.threshold * abs(var_hat_old):
             iter += 1
             var_hat_old = var_hat
-            sig_hat = np.zeros((self.numSamp, self.numSeq))
-            ar_hat = np.zeros((self.numSamp, self.numSeq))
+            sig_hat = np.zeros((self.numSamp, numSeq))
+            ar_hat = np.zeros((self.numSamp, numSeq))
             X = []
             Y = []
             y_neg = []
@@ -415,13 +425,13 @@ class ARXmodelfit(object):
             n_neg = 0
             n_pos = 0
             z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
-            ar_hat = np.zeros((self.numSamp, self.numSeq))
+            ar_hat = np.zeros((self.numSamp, numSeq))
             if self.paradigm == "FRP":
                 beta_s = np.zeros((np.sum(self.compOrder), 2))
             else:
                 beta_s = np.zeros((np.sum(self.compOrder), 1))
 
-            for s in range(self.numSeq):
+            for s in range(numSeq):
                 vep = np.zeros((self.compOrder[0], N))
                 for trial in range(self.numTrial):
                     input = trigOnsets[trial, s] + self.delay[0]
@@ -499,7 +509,7 @@ class ARXmodelfit(object):
             n_neg = 0
             n_pos = 0
             err = []
-            for s in range(self.numSeq):
+            for s in range(numSeq):
                 err.append(np.matmul(arProcess_hat[s].T,
                                      np.matmul(Q_inv, arProcess_hat[s])))
                 matX += np.matmul(X[s].T, np.matmul(Q_inv_s[s], X[s]))
@@ -532,7 +542,7 @@ class ARXmodelfit(object):
                 beta_hat = np.matmul(np.linalg.inv(matX), matY.T)
 
             # Update Q_inv with a detrended V so arburg works well
-            arProcess_vect = np.reshape(arProcess_hat, (N * self.numSeq, 1))
+            arProcess_vect = np.reshape(arProcess_hat, (N * numSeq, 1))
             Q_inv, D, q = self.invCov(self, arProcess_vect[:, 0], Ix, Ix)
             # Estimate alpha and sigma2e with burg
             sigma_hat, ar_coeff = self.arburg(self, arProcess_vect[:, 0])
@@ -553,9 +563,9 @@ class ARXmodelfit(object):
 
         # Compute the loglikelihood
         logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
-        loglikelihood = self.numSeq * logdG + error / sigma_hat
+        loglikelihood = numSeq * logdG + error / sigma_hat
         # Estimated EEG sequences based on the estiamted parameters
-        for s in range(self.numSeq):
+        for s in range(numSeq):
             s_tilde = eeg[:self.ARorder, s]
             noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
             s_hat[:self.ARorder, s] = noise[0, :self.ARorder]
@@ -565,7 +575,7 @@ class ARXmodelfit(object):
                 s_tilde = np.concatenate(
                     (s_tilde[1:], np.expand_dims(s_hat[n, s], 0)))
 
-        signal_hat = np.reshape(sig_hat, (self.numSamp, self.numSeq))
+        signal_hat = np.reshape(sig_hat, (self.numSamp, numSeq))
         y_hat = signal_hat + s_hat
 
         return parameter, loglikelihood, sigma_hat, y_hat, signal_hat, s_hat
@@ -780,30 +790,43 @@ class ARXmodelfit(object):
 
         return err, b
 
-    def calculateAUC(self, p):
+    def calculateAUC(self, scores, labels):
         """
-        with the final belief over the system, updates the querying method and
-            generates len_query most likely queries.
+        Computes the area under the ROC curve (AUC) of a binary classifier.
             Input Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+                scores: classifier scores
+                labels: true labels
             Return:
-                query(list[str]): queries
+                auc: the area under the ROC curve
         """
+        fpr, tpr, _ = metrics.roc_curve(labels, scores, pos_label=1)
+        auc = metrics.auc(fpr, tpr)
 
-        return []
+        return auc
 
-    def calculateACC(self, p):
+    def calculateACC(self, scores, labels):
         """
-        with the final belief over the system, updates the querying method and
-            generates len_query most likely queries.
+        Computes the accuracy of the classification.
             Input Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+                scores: classifier scores
+                labels: true labels
             Return:
-                query(list[str]): queries
-
+                acc: accuracy
         """
+        # Initialization
+        testLabels = []
+        predict = []
+        numSamp = scores.shape[0]
+        # Predicting labels according to the scores
+        for s in range(numSamp):
+            sc = scores[s,:]
+            indx = [i for i in range(self.numTrial) if sc[i] == min(sc)]
+            sc = np.zeros((1,self.numTrial))
+            sc[indx] = 1
+            predict.append(sc)
+            testLabels.append(labels[s,:])
 
-        return []
+        acc = 1 - np.sum(np.abs(predict - testLabels))/(numSamp*self.numTrial)
+
+        return acc
 
