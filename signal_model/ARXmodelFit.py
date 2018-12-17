@@ -387,7 +387,7 @@ class ARXmodelfit(object):
                 channel: set of channels/brain sources (int)
             Return:
                 parameter: estimated parameters fpr the ARX model including AR parameters, gammafunction
-                
+
                 loglikelihood:
                 sigma_hat:
                 y_hat:
@@ -642,7 +642,6 @@ class ARXmodelfit(object):
                 q:
         """
         # Find AR coefficients
-        # Find AR coefficients
         err, b = self.arburg_(self.numSamp, self.ARorder, x)
         L_invt = copy(L_inv)
         # Transpose of L_invt matrix as per Levinson-Durbin recursion
@@ -677,18 +676,85 @@ class ARXmodelfit(object):
 
         return w_inv, d_vec, q
 
-    def loglikelihoodARX(self, p):
+    def loglikelihoodARX(self, y, us, ue,, parameter):
         """
-        with the final belief over the system, updates the querying method and
-        generates len_query most likely queries.
+        Computes the loglikelihood scores
             Input Args:
-                p(list[float]): list of probability distribution over the state estimates
-                len_query(int): number of queries in the scheduled query
+                y: time series of multi channel/brain sources measurement
+                us: trigger information of SSVEPs within sequences
+                ue: trigger information of the target event in the sequence
+                parameters: model parameters for each channel/brain sources
             Return:
-                query(list[str]): queries
+                log_score: loglikelihood scores(s)
         """
+        # Initialization
+        N = self.numSamp - self.ARorder
+        Ix = np.identity(N)
+        z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
+        ar_hat = np.zeros((self.numSamp, 1))
+        log_score = np.zeros((y.shape[0], 1))
+        nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
+                          self.ARorder + sum(self.compOrder) + 1]
+        # VEP components
+        vep = np.zeros((self.compOrder[0], N))
+        for trial in range(self.numTrial):
+            input = us[trial] + self.delay[0]
+            vep += self.gammafunction(self, input)
 
-        return []
+        z[0:self.compOrder[0], :] = vep
+
+        if self.paradigm == "FRP":
+            input_p = us[0] + self.delay[1]
+            input_q = us[0] + self.delay[2]
+            z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
+                self.gammafunction(self, input_p)
+            z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
+                self.gammafunction(self, input_q)
+            if ue > 0:
+                ind = 2
+            else:
+                ind = 1
+            # compute scores for each channel
+            for ch in range(y.shape[0]):
+                beta = parameter[nParam[0]:nParam[1], ch]
+                sigma_hat = parameter[-1, ch]
+                # estimated VEP & ERP terms
+                sig_hat = np.matmul(z.T, beta[:, 1])
+                # AR series - is this ar_hat + res_hat
+                arProcess_hat = y[self.ARorder:, 1] - sig_hat
+                Q_inv, D, _ = self.invCov(self, arProcess_hat, Ix, Ix)
+                error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
+                                                              arProcess_hat))
+                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
+                log_score[ch] = logdG + error / sigma_hat
+
+        else:
+            if ue > 0:
+                input_p = ue + self.delay[1]
+                input_q = ue + self.delay[2]
+            else:
+                input_p = np.zeros((self.compOrder[1], N))
+                input_q = np.zeros((self.compOrder[2], N))
+
+            z[self.compOrder[0]:self.compOrder[1], :] = \
+                self.gammafunction(self, input_p)
+            z[self.compOrder[1]:self.compOrder[2], :] = \
+                self.gammafunction(self, input_q)
+            # compute scores for each channel
+            for ch in range(y.shape[0]):
+                beta = parameter[nParam[0]:-1, ch]
+                sigma_hat = parameter[-1, ch]
+                # estimated VEP & ERP terms
+                sig_hat = np.matmul(z.T, beta[:, 1])
+                # AR series - is this ar_hat + res_hat
+                arProcess_hat = y[self.ARorder:, 1] - sig_hat
+                Q_inv, D, _ = self.invCov(self, arProcess_hat, Ix, Ix)
+                error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
+                                                              arProcess_hat))
+                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
+                log_score[ch] = logdG + error / sigma_hat
+
+        return log_score
 
     def arburg(self, x):
         """
