@@ -388,11 +388,11 @@ class ARXmodelfit(object):
             Return:
                 parameter: estimated parameters fpr the ARX model including AR parameters, gammafunction
 
-                loglikelihood:
-                sigma_hat:
-                y_hat:
-                signal_hat:
-                s_hat:
+                loglikelihood: loglikelihood scores
+                sigma_hat: estimation error
+                y_hat: synthetic eeg signal
+                signal_hat: estimated brain activities due to visual stimuli including VEP+ERP
+                s_hat: estimated AR process in the signal model
         """
         # Initialization
         eeg = data["timeseries"][channel,:,:]
@@ -632,14 +632,6 @@ class ARXmodelfit(object):
         """
         Calculate inverse of AR covariance matrix via LDR V is NXps ensemble of  residuals, Linv & Winv are
         initialized to I_N
-            Input Args:
-                x: is Nx1
-                L_invt:
-                w_inv:
-            Return:
-                w_inv:
-                d_vec:
-                q:
         """
         # Find AR coefficients
         err, b = self.arburg_(self.numSamp, self.ARorder, x)
