@@ -27,24 +27,31 @@ class ARXmodelfit(object):
             auc():
         """
 
-    def __init__(self, fs, filename, paradigm, numTrial, numSeq, numSamp,
-                 hyperparameter, channels, orderSelection=False,
-                 nfold=10, threshold=1e-6):
+    def __init__(self, fs, paradigm, numTrial, numSeq, numSamp, hyperparameter,
+                 channels, threshold=1e-6, orderSelection=False):
         self.fs = fs
-        self.filename = filename
         self.paradigm = paradigm
         self.channels = channels
         self.numSamp = numSamp
         self.numSeq = numSeq
         self.numTrial = numTrial
-        self.ARorder = hyperparameter[0]
-        self.tau = hyperparameter[1]
-        self.delays = hyperparameter[2]
-        self.comOrder = hyperparameter[3]
+
+        if orderSelection:
+            self.ARorder = hyperparameter[:,0]
+            self.tau = hyperparameter[:,1:4]
+            self.delays = hyperparameter[:,4:7]
+            self.comOrder = hyperparameter[:,7:]
+        else:
+            self.ARorder = hyperparameter[0]
+            self.tau = hyperparameter[1:4]
+            self.delays = hyperparameter[4:7]
+            self.comOrder = hyperparameter[7:]
+
         self.threshold = threshold
+        self.orderSelection = orderSelection
 
 
-    def ARXmodelfit(self, data, nFold = 10, orderSelection = False):
+    def ARXmodelfit(self, data, nFold = 10):
         """
         fits an ARX model to the multi-channel/ brain sources timeseries signal
         using the cyclic decent method
@@ -72,31 +79,39 @@ class ARXmodelfit(object):
         score = []
 
         # Time resolution for delays in grid search for model order selection
-        if orderSelection:
+        if self.orderSelection:
             dD = np.round(.005*float(self.fs))
-            delay0 = [self.delays[0][0]+dD for i in
-                      range((self.delays[0][1] - self.delays[0][0])*dD+1)]
-            delay1 = [self.delays[1][0]+dD for i in
-                      range((self.delays[1][1] - self.delays[1][0])*dD+1)]
-            delay2 = [self.delays[2][0]+dD for i in
-                      range((self.delays[2][1] - self.delays[2][0])*dD+1)]
+            delay0 = [int(self.delays[0][0]+i*dD) for i in
+                      range(int((self.delays[1][0] - self.delays[0][0])*dD+1))]
+            delay1 = [int(self.delays[0][1]+i*dD) for i in
+                      range(int((self.delays[1][1] - self.delays[0][1])*dD+1))]
+            delay2 = [int(self.delays[0][2]+i*dD) for i in
+                      range(int((self.delays[1][2] - self.delays[0][2])*dD+1))]
             AR_range = range(self.ARorder[0],self.ARorder[1]+1)
-            tau0_range = range(self.tau[0][0],self.tau[0][1]+1)
-            tau1_range = range(self.tau[1][0],self.tau[1][1]+1)
-            tau2_range = range(self.tau[2][0],self.tau[2][1]+1)
+            tau0_range = range(self.tau[0][0],self.tau[1][0]+1)
+            tau1_range = range(self.tau[0][1],self.tau[1][1]+1)
+            tau2_range = range(self.tau[0][2],self.tau[1][2]+1)
 
         # training the model within K-fold cross validation
-        data_train, data_test = self.data_for_corssValidation(self, data, nFold)
+        y_test, y_train, us_test, us_train, ue_test, ue_train = \
+            self.data_for_corssValidation(data, nFold)
+
         # Create Object
         prog = pyprog.ProgressBar(" ", "", 34)
         # Update Progress Bar
         prog.update()
         for f in range(nFold):
+            data_train = dict()
+            data_test = dict()
+            data_train.update({"timeseries":y_train[f], "stimOnset":us_train[f],
+                          "targetOnset":ue_train[f], "numSeq":ue_train[f].shape[1]})
+            data_test.update({"timeseries":y_test[f], "stimOnset":us_test[f],
+                         "targetOnset":ue_test[f], "numSeq":ue_test[f].shape[0]})
             # Parameters estimation for each channel/brain sources
-            numSeq_train = data_train[f]["numSeq"]
-            numSeq_test = data_test[f]["numSeq"]
+            numSeq_train = data_train["numSeq"]
+            numSeq_test = data_test["numSeq"]
             for ch in range(len(self.channels)):
-                if orderSelection:
+                if self.orderSelection:
                     bic = []
                     for k in AR_range:
                         hyperparameters = []
@@ -116,14 +131,14 @@ class ARXmodelfit(object):
                                                 self.delays = [d0, d1, d2]
                                                 self.numSeq
                                                 parameter_hat, _ = \
-                                                self.cyclic_decent_method(self,
-                                                                 data_train[f], ch)
-                                                auc_, _ = self.model_eval(self,
+                                                self.cyclic_decent_method(
+                                                                 data_train, ch)
+                                                auc_, _ = self.model_eval(
                                                                 parameter_hat,
-                                                                data_test[f], ch)
+                                                                data_test, ch)
                                                 parameter, loglike, sigma_hat, \
-                                                _ = self.cyclic_decent_method(self,
-                                                                 data_test[f], ch)
+                                                _ = self.cyclic_decent_method(
+                                                                 data_test, ch)
                                                 hyperparameters.append([k,
                                                                         self.tau,
                                                     self.delays, self.compOrder])
@@ -140,7 +155,7 @@ class ARXmodelfit(object):
                                                 self.compOrder])
                         nParam = [k, k + sum(self.compOrder),
                                   k + sum(self.compOrder) + 1]
-                        _, L, _ = self.cyclic_decent_method(self, data_test[f], ch)
+                        _, L, _ = self.cyclic_decent_method(data_test, ch)
                         # Compute BIC measure for AR model order selection
                         bic.append(L + k*np.log(numSeq_train*(numSeq_test - k)))
 
@@ -152,16 +167,15 @@ class ARXmodelfit(object):
 
                 nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
-                parameter_hat[f,ch], _ = self.cyclic_decent_method(self,
-                                                             data_train[f], ch)
+                parameter_hat[f,ch], _ = self.cyclic_decent_method(data_train, ch)
                 auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
-                    self.model_eval(self, parameter_hat[f,ch], data_test, ch)
+                    self.model_eval(parameter_hat[f,ch], data_test, ch)
                 score.append(score_)
                 trialTargetness.append(trialTargetness_ch)
 
             data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
-            auc[f], acc[f], _ = self.model_eval(self, parameter_hat[f, :],
-                                         data_test[f], self.channels)
+            auc[f], acc[f], _ = self.model_eval(parameter_hat[f, :],
+                                         data_test, self.channels)
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
             # Set current status
@@ -186,18 +200,20 @@ class ARXmodelfit(object):
                         and targets for all sequences
                 nFold: number of folds(int)
             Return:
-                data_train: a dictionary including timeseries, onsets of stimuli,
-                            targets, and number of samples for training in K folds
-                data_test: a dictionary including timeseries, onsets of stimuli,
-                            targets, and number of samples for test in K folds
+                y_test: a list including timeseries signal for all test folds
+                y_train: a list including timeseries signal for all training folds
+                us_test: a list of onsets of stimuli across all test folds
+                us_train: a list of onsets of stimuli across all training folds
+                ue_test: a list of target locations across all test folds
+                ue_train: a list of target locations across all training folds
         """
         # Initilization
-        foldSampSize = np.floor(self.numSamp/nFold)
+        foldSampSize = np.floor(self.numSeq/nFold)
         eeg = data["timeseries"]
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
-        data_train = np.zeros((nFold, 1))
-        data_test = np.zeros((nFold, 1))
+        data_train = dict()
+        data_test = dict()
         # shuffling data set
         indx = np.random.permutation(self.numSeq)
         eeg_sh = eeg[:,:,indx]
@@ -247,8 +263,8 @@ class ARXmodelfit(object):
                     ue_test.append(ue_train_)
             else:
                 if self.paradigm == "FRP":
-                    testIndx = range(f*np.floor(foldSampSize/2),
-                                            (f+1)*np.floor(foldSampSize/2)+1)
+                    testIndx = range(int(f*np.floor(foldSampSize/2)),
+                                     int((f+1)*np.floor(foldSampSize/2)+1))
                     testIndx_pos = min(len(ind_frp_pos), len(testIndx))
                     testIndx_neg = min(len(ind_frp_neg), len(testIndx))
                     y_test_pos = copy(y_train_pos[:,:,testIndx_pos])
@@ -260,31 +276,35 @@ class ARXmodelfit(object):
                     y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
                     us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
                     ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
-                    y_train_pos = np.delet(y_train_pos, testIndx_pos, 2)
-                    y_train_neg = np.delet(y_train_neg, testIndx_neg, 2)
-                    us_train_pos = np.delet(us_train_pos, testIndx_pos, 1)
-                    us_train_neg = np.delet(us_train_neg, testIndx_neg, 1)
-                    ue_train_pos = np.delet(ue_train_pos, testIndx_pos, 0)
-                    ue_train_neg = np.delet(ue_train_neg, testIndx_neg, 0)
+                    tmp = copy(y_train_pos)
+                    y_train_pos = np.delete(tmp, testIndx_pos, 2)
+                    tmp = copy(y_train_neg)
+                    y_train_neg = np.delete(tmp, testIndx_neg, 2)
+                    tmp = copy(us_train_pos)
+                    us_train_pos = np.delete(tmp, testIndx_pos, 1)
+                    tmp = copy(us_train_neg)
+                    us_train_neg = np.delete(tmp, testIndx_neg, 1)
+                    tmp = copy(ue_train_pos)
+                    ue_train_pos = np.delete(tmp, testIndx_pos, 0)
+                    tmp = copy(ue_train_neg)
+                    ue_train_neg = np.delete(tmp, testIndx_neg, 0)
                     y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
                     us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
                     ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
                 else:
-                    testIndx = range(f*np.floor(foldSampSize),
-                                     (f+1)*np.floor(foldSampSize)+1)
+                    testIndx = range(int(f*np.floor(foldSampSize)),
+                                     int((f+1)*np.floor(foldSampSize)+1))
                     y_test.append(y_train_[:,:,testIndx])
                     us_test.append(us_train_[:,testIndx])
-                    ue_test.append(ue_train_[testIndx])
-                    y_train.append(np.delet(y_train_, testIndx, 1))
-                    us_train.append(np.delet(us_train_, testIndx, 1))
-                    ue_train.append(np.delet(ue_train_, testIndx, 0))
+                    ue_test.append(ue_train_[0,testIndx])
+                    tmp = copy(y_train_)
+                    y_train.append(np.delete(tmp, testIndx, 2))
+                    tmp = copy(us_train_)
+                    us_train.append(np.delete(tmp, testIndx, 1))
+                    tmp = copy(ue_train_)
+                    ue_train.append(np.delete(tmp, testIndx, 1))
 
-            data_train[f] = {"timeseries":y_train, "stimOnset":us_train,
-                          "targetOnset":ue_train, "numSeq":len(ue_train)}
-            data_test[f] = {"timeseries":y_test, "stimOnset":us_test,
-                         "targetOnset":ue_test, "numSeq":len(ue_test)}
-
-        return data_train, data_test
+        return y_test, y_train, us_test, us_train, ue_test, ue_train
 
 
     def model_eval(self, parameter, data, channel):
@@ -668,7 +688,7 @@ class ARXmodelfit(object):
 
         return w_inv, d_vec, q
 
-    def loglikelihoodARX(self, y, us, ue,, parameter):
+    def loglikelihoodARX(self, y, us, ue, parameter):
         """
         Computes the loglikelihood scores
             Input Args:
