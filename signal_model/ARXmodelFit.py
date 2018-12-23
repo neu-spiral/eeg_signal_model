@@ -40,12 +40,12 @@ class ARXmodelfit(object):
             self.ARorder = hyperparameter[:,0]
             self.tau = hyperparameter[:,1:4]
             self.delays = hyperparameter[:,4:7]
-            self.comOrder = hyperparameter[:,7:]
+            self.compOrder = hyperparameter[0,7:]
         else:
             self.ARorder = hyperparameter[0]
             self.tau = hyperparameter[1:4]
             self.delays = hyperparameter[4:7]
-            self.comOrder = hyperparameter[7:]
+            self.compOrder = hyperparameter[7:]
 
         self.threshold = threshold
         self.orderSelection = orderSelection
@@ -130,14 +130,16 @@ class ARXmodelfit(object):
                                                 self.tau = [tau0, tau1, tau2]
                                                 self.delays = [d0, d1, d2]
                                                 self.numSeq
-                                                parameter_hat, _ = \
+                                                parameter_hat, _, _, _, _, _ = \
                                                 self.cyclic_decent_method(
                                                                  data_train, ch)
-                                                auc_, _ = self.model_eval(
+                                                data_test["coeff"] = 1
+                                                auc_, _,_,_ = self.model_eval(
                                                                 parameter_hat,
-                                                                data_test, ch)
+                                                                data_test, [ch])
                                                 parameter, loglike, sigma_hat, \
-                                                _ = self.cyclic_decent_method(
+                                                _, _, _  = \
+                                                    self.cyclic_decent_method(
                                                                  data_test, ch)
                                                 hyperparameters.append([k,
                                                                         self.tau,
@@ -148,14 +150,14 @@ class ARXmodelfit(object):
                         indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
                         indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
                         self.tau = hyperparameters[indx1[indx2]][1]
-                        self.delay = hyperparameters[indx1[indx2]][2]
+                        self.delays = hyperparameters[indx1[indx2]][2]
                         self.compOrder = hyperparameters[indx1[indx2]][3]
                         hyperparameters = []
                         hyperparameters.append([k, self.tau, self.delays,
                                                 self.compOrder])
                         nParam = [k, k + sum(self.compOrder),
                                   k + sum(self.compOrder) + 1]
-                        _, L, _ = self.cyclic_decent_method(data_test, ch)
+                        _, L, _, _, _, _ = self.cyclic_decent_method(data_test, ch)
                         # Compute BIC measure for AR model order selection
                         bic.append(L + k*np.log(numSeq_train*(numSeq_test - k)))
 
@@ -167,14 +169,15 @@ class ARXmodelfit(object):
 
                 nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
-                parameter_hat[f,ch], _ = self.cyclic_decent_method(data_train, ch)
+                parameter_hat[f,ch], _, _, _, _, _ = \
+                    self.cyclic_decent_method(data_train, ch)
                 auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
                     self.model_eval(parameter_hat[f,ch], data_test, ch)
                 score.append(score_)
                 trialTargetness.append(trialTargetness_ch)
 
             data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
-            auc[f], acc[f], _ = self.model_eval(parameter_hat[f, :],
+            auc[f], acc[f], _, _ = self.model_eval(parameter_hat[f, :],
                                          data_test, self.channels)
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
@@ -326,10 +329,10 @@ class ARXmodelfit(object):
         y = data["timeseries"]
         us = data["stimOnset"]
         ue = data["targetOnset"]
-        coeff = data["coeff"]
         # Initialization
         label = np.zeros((numSeq,1))
-        sc = np.zeros((len(channel), numSeq))
+        coeff = data["coeff"]
+        sc = np.zeros((self.numTrial, numSeq))
         score = np.zeros((len(channel), numSeq*(self.numTrial+1)))
         if self.paradigm == "FRP":
             loglikelihood = np.zeros((numSeq, 2, len(channel)))
@@ -349,9 +352,9 @@ class ARXmodelfit(object):
                     trialTargetness[seq,1] = 0
                     trialTargetness[seq,0] = 1
 
-                loglikelihood[seq,0,:] = self.loglikelihoodARX(self, y[:,:,seq],
+                loglikelihood[seq,0,:] = self.loglikelihoodARX(y[channel,:,seq],
                                                       us[:,seq], 0, parameter)
-                loglikelihood[seq,1,:] = self.loglikelihoodARX(self, y[:,:,seq],
+                loglikelihood[seq,1,:] = self.loglikelihoodARX(y[channel,:,seq],
                                                       us[:,seq], us[:,seq],
                                                                parameter)
             else:
@@ -363,8 +366,8 @@ class ARXmodelfit(object):
                         trialTargetness[seq,trial] = 1
                     else:
                         trialTargetness[seq,trial] = 0
-                    loglikelihood[seq,trial,:] = self.loglikelihoodARX(self,
-                                             y[:,:,seq], us[:,seq],
+                    loglikelihood[seq,trial,:] = self.loglikelihoodARX(
+                                             y[channel,:,seq], us[:,seq],
                                             possibleTarget[trial], parameter)
         # Computing auc and acc of the classifier
         if self.paradigm == "FRP":
@@ -381,8 +384,8 @@ class ARXmodelfit(object):
             for ch in range(len(channel)):
                 ss = (-1)*loglikelihood[:,:,ch]
                 for seq in range(numSeq):
-                    sc[seq,:] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
-                    sc[seq, sc[seq,:] ==0] = (-1)*np.mean(sc[seq, sc[seq,:]!=0])
+                    sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
+                    sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
 
                 score[ch,:] = np.reshape(sc,1,(self.numTrial+1)*numSeq)
             scores = np.matmul(coeff.T, score)
@@ -420,7 +423,7 @@ class ARXmodelfit(object):
         numSeq = data["numSeq"]
         N = self.numSamp - self.ARorder
         Ix = np.identity(N)
-        err, b = self.arburg(self, eeg[:, 0])
+        err, b = self.arburg(eeg[:, 0])
         var_hat = .1 * err
         var_hat_old = 1.5 * err
         Q_inv = copy(Ix)
@@ -437,7 +440,7 @@ class ARXmodelfit(object):
             sig_hat = np.zeros((self.numSamp, numSeq))
             ar_hat = np.zeros((self.numSamp, numSeq))
             X = []
-            Y = []
+            y = []
             y_neg = []
             y_pos = []
             arProcess_hat = []
@@ -454,29 +457,31 @@ class ARXmodelfit(object):
             for s in range(numSeq):
                 vep = np.zeros((self.compOrder[0], N))
                 for trial in range(self.numTrial):
-                    input = trigOnsets[trial, s] + self.delay[0]
-                    vep += self.gammafunction(self, input)
+                    input = trigOnsets[trial, s] + self.delays[0]
+                    vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
 
                 z[0:self.compOrder[0], :] = vep
                 if self.paradigm == "FRP":
-                    input_p = trigOnsets[0, s] + self.delay[1]
-                    input_q = trigOnsets[0, s] + self.delay[2]
+                    input_p = trigOnsets[0, s] + self.delays[1]
+                    input_q = trigOnsets[0, s] + self.delays[2]
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
-                        self.gammafunction(self, input_p)
+                        self.gammafunction(input_p, self.compOrder[1], self.tau[1])
                     z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
-                        self.gammafunction(self, input_q)
+                        self.gammafunction(input_q, self.compOrder[2], self.tau[2])
                 elif self.paradigm == "ERP":
-                    if data["targetOnset"][s]>0:
-                        input_p = data["targetOnset"][s] + self.delay[1]
-                        input_q = data["targetOnset"][s] + self.delay[2]
+                    if data["targetOnset"][0][s] > 0:
+                        input_p = data["targetOnset"][0][s] + self.delays[1]
+                        input_q = data["targetOnset"][0][s] + self.delays[2]
+                        tmp1 = self.gammafunction(input_p, self.compOrder[1],
+                                                  self.tau[1])
+                        tmp2 = self.gammafunction(input_q, self.compOrder[2],
+                                                  self.tau[2])
                     else:
-                        input_p = np.zeros((self.compOrder[1], N))
-                        input_q = np.zeros((self.compOrder[2], N))
+                        tmp1 = np.zeros((self.compOrder[1], N))
+                        tmp2 = np.zeros((self.compOrder[2], N))
 
-                    z[self.compOrder[0]:self.compOrder[1], :] = \
-                        self.gammafunction(self, input_p)
-                    z[self.compOrder[1]:self.compOrder[2], :] = \
-                        self.gammafunction(self, input_q)
+                    z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
+                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
                 else:
                     warnings.warn(
                         "Please enter a valid paradigm e.g., FRP or ERP!")
@@ -489,7 +494,7 @@ class ARXmodelfit(object):
                 # check the experiment paradigm
                 if self.paradigm == "FRP":
                     # separate positive and negative FRP sequences
-                    if data["targetOnset"][s] > 0:
+                    if data["targetOnset"][0][s] > 0:
                         # negative sequences
                         y_neg.append(y_s)
                         temp = np.matmul(z, Q_inv)
@@ -509,22 +514,22 @@ class ARXmodelfit(object):
                         sig_hat[self.ARorder:, s] = np.matmul(z.T, beta_s[:, 0])
 
                 if self.paradigm == "ERP":
-                    temp = np.matmul(z.T, Q_inv)
+                    temp = np.matmul(z, Q_inv)
                     beta_s = np.matmul(np.linalg.inv(np.matmul(temp, z.T)),
                                        np.matmul(temp, y_s))
                     # estimated VEP & ERP terms
-                    sig_hat[:, s] = np.matmul(z, beta_s)
+                    sig_hat[self.ARorder:, s] = np.matmul(z.T, beta_s)
                     y.append(y_s)
 
                 # AR series - is this ar_hat + res_hat
                 arProcess_hat.append(y_s - sig_hat[self.ARorder:, s])
-                w_inv, d_vec, q = self.invCov(self, arProcess_hat[-1], Ix, Ix)
+                w_inv, d_vec, q = self.invCov(arProcess_hat[-1], Ix, Ix)
                 Q_inv_s.append(w_inv)
                 Q_inv = copy(w_inv)
 
             matX = np.zeros((sum(self.compOrder), sum(self.compOrder)))
             matY = np.zeros((1, sum(self.compOrder)))
-            matY_neg = np.zeros((1, sum(self.ompOrder)))
+            matY_neg = np.zeros((1, sum(self.compOrder)))
             matY_pos = np.zeros((1, sum(self.compOrder)))
             n_neg = 0
             n_pos = 0
@@ -563,9 +568,9 @@ class ARXmodelfit(object):
 
             # Update Q_inv with a detrended V so arburg works well
             arProcess_vect = np.reshape(arProcess_hat, (N * numSeq, 1))
-            Q_inv, D, q = self.invCov(self, arProcess_vect[:, 0], Ix, Ix)
+            Q_inv, D, q = self.invCov(arProcess_vect[:, 0], Ix, Ix)
             # Estimate alpha and sigma2e with burg
-            sigma_hat, ar_coeff = self.arburg(self, arProcess_vect[:, 0])
+            sigma_hat, ar_coeff = self.arburg(arProcess_vect[:, 0])
             error = np.mean(err)
             # Mean square error - diff. from mse of lscov
             var_hat = sigma_hat
@@ -573,18 +578,16 @@ class ARXmodelfit(object):
         alpha_hat = np.expand_dims((-1) * ar_coeff[0, 1:], 1)
         sigma_hat = np.expand_dims(np.expand_dims(sigma_hat, 1), 1)
         if self.paradigm == "FRP":
-            parameter.append(
-                np.concatenate((alpha_hat, beta_hat_pos, sigma_hat)))
-            parameter.append(
-                np.concatenate((alpha_hat, beta_hat_neg, sigma_hat)))
+            parameter = np.concatenate((alpha_hat, beta_hat_pos, sigma_hat))
+            parameter = np.concatenate((alpha_hat, beta_hat_neg, sigma_hat))
 
         if self.paradigm == "ERP":
-            parameter.append(np.concatenate((alpha_hat, beta_hat, sigma_hat)))
+            parameter = np.concatenate((alpha_hat, beta_hat, sigma_hat))
 
         # Compute the loglikelihood
         logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
         loglikelihood = numSeq * logdG + error / sigma_hat
-        # Estimated EEG sequences based on the estiamted parameters
+        # Estimated EEG sequences based on the estimated parameters
         for s in range(numSeq):
             s_tilde = eeg[:self.ARorder, s]
             noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
@@ -600,7 +603,7 @@ class ARXmodelfit(object):
 
         return parameter, loglikelihood, sigma_hat, y_hat, signal_hat, s_hat
 
-    def gammafunction(self, x):
+    def gammafunction(self, x, compOrder, tau):
         """
         Generates the brain impulse responses to the visual and target-related stimuli. Here it is assumed that
         this response can be modeled by the gamma function  as follow:
@@ -611,6 +614,8 @@ class ARXmodelfit(object):
         Sequences" paper.
             Input Args:
                 x: is Nx1
+                compOrder: order of the polynomial exponential function
+                tau: indicates skewness of the exponential function
             Return:
                 y_gamma: an array including the value of gamma function
         """
@@ -632,18 +637,18 @@ class ARXmodelfit(object):
             m = np.array(range(int(M)))
             z = []  # np.zeros((comp_order, M))
 
-            for r in range(self.compOrder):
+            for r in range(compOrder):
                 z.append(np.power((m / float(r + 1)), (r + 1)) * np.exp(
-                    -1. * m / self.tau))
+                    -1. * m / tau))
 
             if dn == 0:
                 y += z
             else:
-                temp = np.zeros((self.compOrder, s * dn))
+                temp = np.zeros((compOrder, s * dn))
                 z = z.reshape()
                 y += np.concatenate((temp, z), 0)
 
-        temp = np.zeros((self.compOrder, int(Onset0 - self.ARorder - 1)))
+        temp = np.zeros((compOrder, int(Onset0 - self.ARorder - 1)))
         y_gamma = np.concatenate((temp, y), 1)
 
         return y_gamma
@@ -654,15 +659,19 @@ class ARXmodelfit(object):
         initialized to I_N
         """
         # Find AR coefficients
-        err, b = self.arburg_(self.numSamp, self.ARorder, x)
+        err, b = self.arburg_(x)
         L_invt = copy(L_inv)
+        N = self.numSamp - self.ARorder
         # Transpose of L_invt matrix as per Levinson-Durbin recursion
         for ar in range(self.ARorder):
             coef = b[ar]
             L_invt[:ar + 1, ar + 1] = coef
 
-        for ar in range(self.numSamp - self.ARorder - 1):
-            L_invt[ar + 1:ar + self.ARorder + 1, ar + self.ARorder + 1] = coef
+        for ar in range(N - self.ARorder - 1):
+            try:
+                L_invt[ar + 1:ar + self.ARorder + 1, ar + self.ARorder] = coef
+            except:
+                tt = 1
 
         # Elements of diagonal matrix as per Levinson-Durbin recursion
         x_xcov = np.cov(x, bias=False, ddof=0)
@@ -710,18 +719,18 @@ class ARXmodelfit(object):
         # VEP components
         vep = np.zeros((self.compOrder[0], N))
         for trial in range(self.numTrial):
-            input = us[trial] + self.delay[0]
-            vep += self.gammafunction(self, input)
+            input = us[trial] + self.delays[0]
+            vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
 
         z[0:self.compOrder[0], :] = vep
 
         if self.paradigm == "FRP":
-            input_p = us[0] + self.delay[1]
-            input_q = us[0] + self.delay[2]
+            input_p = us[0] + self.delays[1]
+            input_q = us[0] + self.delays[2]
             z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
-                self.gammafunction(self, input_p)
+                self.gammafunction(input_p, self.compOrder[1], self.tau[1])
             z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
-                self.gammafunction(self, input_q)
+                self.gammafunction(input_q, self.compOrder[2], self.tau[2])
             if ue > 0:
                 ind = 2
             else:
@@ -734,7 +743,7 @@ class ARXmodelfit(object):
                 sig_hat = np.matmul(z.T, beta[:, 1])
                 # AR series - is this ar_hat + res_hat
                 arProcess_hat = y[self.ARorder:, 1] - sig_hat
-                Q_inv, D, _ = self.invCov(self, arProcess_hat, Ix, Ix)
+                Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
                                                               arProcess_hat))
                 logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
@@ -742,25 +751,27 @@ class ARXmodelfit(object):
 
         else:
             if ue > 0:
-                input_p = ue + self.delay[1]
-                input_q = ue + self.delay[2]
+                input_p = ue + self.delays[1]
+                input_q = ue + self.delays[2]
+                tmp1 = self.gammafunction(input_p, self.compOrder[1],
+                                          self.tau[1])
+                tmp2 = self.gammafunction(input_q, self.compOrder[2],
+                                          self.tau[2])
             else:
-                input_p = np.zeros((self.compOrder[1], N))
-                input_q = np.zeros((self.compOrder[2], N))
+                tmp1 = np.zeros((self.compOrder[1], N))
+                tmp2 = np.zeros((self.compOrder[2], N))
 
-            z[self.compOrder[0]:self.compOrder[1], :] = \
-                self.gammafunction(self, input_p)
-            z[self.compOrder[1]:self.compOrder[2], :] = \
-                self.gammafunction(self, input_q)
+            z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
+            z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
             # compute scores for each channel
             for ch in range(y.shape[0]):
                 beta = parameter[nParam[0]:-1, ch]
                 sigma_hat = parameter[-1, ch]
                 # estimated VEP & ERP terms
-                sig_hat = np.matmul(z.T, beta[:, 1])
+                sig_hat = np.matmul(z.T, beta)
                 # AR series - is this ar_hat + res_hat
-                arProcess_hat = y[self.ARorder:, 1] - sig_hat
-                Q_inv, D, _ = self.invCov(self, arProcess_hat, Ix, Ix)
+                arProcess_hat = y[ch, self.ARorder:] - sig_hat
+                Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
                                                               arProcess_hat))
                 logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
@@ -790,7 +801,6 @@ class ARXmodelfit(object):
 
         # Initialization
         N = float(x.shape[0])
-        b = []
         a = [[1]]
         err = np.sum(x * x) / N
         k = np.zeros((self.ARorder, 1))
@@ -815,11 +825,10 @@ class ARXmodelfit(object):
             # coef = float(-1) * a[0][1:]
             # coef = float(-1) * np.flip([coef], 1)
             # coef = np.concatenate(([1],coef[0]))
-            b.append(a)
             # Update the prediction error
             err = (1 - kk * kk) * err
 
-        return err, b[self.ARorder]
+        return err, a
 
     def arburg_(self, x):
         """
