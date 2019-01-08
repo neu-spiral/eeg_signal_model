@@ -332,14 +332,14 @@ class ARXmodelfit(object):
         # Initialization
         label = np.zeros((numSeq,1))
         coeff = data["coeff"]
-        sc = np.zeros((self.numTrial, numSeq))
+        sc = np.zeros((self.numTrial+1, numSeq))
         score = np.zeros((len(channel), numSeq*(self.numTrial+1)))
         if self.paradigm == "FRP":
             loglikelihood = np.zeros((numSeq, 2, len(channel)))
             trialTargetness = np.zeros((numSeq, 2))
         else:
-            loglikelihood = np.zeros((numSeq, self.numTrial, len(channel)))
-            trialTargetness = np.zeros((numSeq, self.numTrial))
+            loglikelihood = np.zeros((numSeq, self.numTrial+1, len(channel)))
+            trialTargetness = np.zeros((numSeq, self.numTrial+1))
         # Computing loglikehood scores for each possible target location
         for seq in range(numSeq):
             if self.paradigm == "FRP":
@@ -360,7 +360,7 @@ class ARXmodelfit(object):
             else:
                 targetLoc = ue[seq]
                 possibleTarget = np.concatenate(([0], us[:,seq]))
-                for trial in range(self.numTrial):
+                for trial in range(self.numTrial+1):
                     if np.abs(possibleTarget[trial] - targetLoc) < 3:
                         label[seq] = trial + 1
                         trialTargetness[seq,trial] = 1
@@ -384,14 +384,25 @@ class ARXmodelfit(object):
             for ch in range(len(channel)):
                 ss = (-1)*loglikelihood[:,:,ch]
                 for seq in range(numSeq):
-                    sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
-                    sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
+                    try:
+                        sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
+                        sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
+                    except:
+                        tt = 1
 
-                score[ch,:] = np.reshape(sc,1,(self.numTrial+1)*numSeq)
-            scores = np.matmul(coeff.T, score)
-            t_target = np.reshape(trialTargetness,1,(self.numTrial+1)*numSeq)
+
+                score[ch,:] = np.reshape(sc,(self.numTrial+1)*numSeq,1)
+
+            #if coeff == 1:
+            scores = copy(score[0])
+            #else:
+            #   scores = np.matmul(coeff, score)
+
+            t_target = np.reshape(trialTargetness,(self.numTrial+1)*numSeq,1)
             auc = self.calculateAUC(scores, t_target)
-            acc = self.calculateACC(scores, t_target)
+            ss = np.reshape(scores,((self.numTrial+1),numSeq))
+            tt = np.reshape(t_target,((self.numTrial+1),numSeq))
+            acc = self.calculateACC(ss, tt)
             trialTargetness = []
             trialTargetness = t_target
 
@@ -901,19 +912,20 @@ class ARXmodelfit(object):
                 acc: accuracy
         """
         # Initialization
-        testLabels = []
-        predict = []
-        numSamp = scores.shape[0]
+        err_sum = 0.0
+        numSamp = scores.shape[1]
         # Predicting labels according to the scores
         for s in range(numSamp):
-            sc = scores[s,:]
+            sc = scores[:,s]
             indx = [i for i in range(self.numTrial) if sc[i] == min(sc)]
-            sc = np.zeros((1,self.numTrial))
-            sc[indx] = 1
-            predict.append(sc)
-            testLabels.append(labels[s,:])
+            sc = np.zeros(self.numTrial+1)
+            try:
+                sc[indx[0]] = 1
+            except:
+                tt = 1
+            err_sum += np.sum(np.abs(sc - labels[:,s]))
 
-        acc = 1 - np.sum(np.abs(predict - testLabels))/(numSamp*self.numTrial)
+        acc = 1 - err_sum/(numSamp*self.numTrial)
 
         return acc
 
