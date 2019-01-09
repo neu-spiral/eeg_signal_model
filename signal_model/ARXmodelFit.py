@@ -1,7 +1,7 @@
 import numpy as np
 import warnings
 from copy import copy
-from sklearn import metrics
+from sklearn import metrics, linear_model
 import pyprog
 
 
@@ -73,8 +73,7 @@ class ARXmodelfit(object):
         auc_ch = np.zeros((nFold, len(self.channels)))
         auc = np.zeros((nFold, 1))
         acc = np.zeros((nFold, 1))
-        parameter_hat = np.zeros((nFold, len(self.channels)))
-        parameter_ = []
+        parameter_hat = np.zeros((nFold, 100, len(self.channels)))               # the maximum size of the parameters assumed to be 100
         trialTargetness = []
         score = []
 
@@ -106,23 +105,23 @@ class ARXmodelfit(object):
             data_train.update({"timeseries":y_train[f], "stimOnset":us_train[f],
                           "targetOnset":ue_train[f], "numSeq":ue_train[f].shape[1]})
             data_test.update({"timeseries":y_test[f], "stimOnset":us_test[f],
-                         "targetOnset":ue_test[f], "numSeq":ue_test[f].shape[0]})
+                         "targetOnset":ue_test[f], "numSeq":ue_test[f].shape[1]})
             # Parameters estimation for each channel/brain sources
             numSeq_train = data_train["numSeq"]
             numSeq_test = data_test["numSeq"]
-            for ch in range(len(self.channels)):
+            for ch in range(2):#range(len(self.channels)):
                 if self.orderSelection:
                     bic = []
                     for k in AR_range:
                         hyperparameters = []
                         error = []
                         auc = []
-                        for tau0 in tau0_range:
-                            for tau1 in tau1_range:
-                                for tau2 in tau2_range:
-                                    for d0 in delay0:
-                                        for d1 in delay1:
-                                            for d2 in delay2:
+                        for tau0 in [tau0_range[0]]:
+                            for tau1 in [tau1_range[0]]:
+                                for tau2 in [tau2_range[0]]:
+                                    for d0 in [delay0[0]]:
+                                        for d1 in [delay1[0]]:
+                                            for d2 in [delay2[0]]:
                                                 nParam = [k,
                                                           k+sum(self.compOrder),
                                                           k+sum(self.compOrder)+1]
@@ -130,12 +129,12 @@ class ARXmodelfit(object):
                                                 self.tau = [tau0, tau1, tau2]
                                                 self.delays = [d0, d1, d2]
                                                 self.numSeq
-                                                parameter_hat, _, _, _, _, _ = \
+                                                param, _, _, _, _, _ = \
                                                 self.cyclic_decent_method(
                                                                  data_train, ch)
                                                 data_test["coeff"] = 1
                                                 auc_, _,_,_ = self.model_eval(
-                                                                parameter_hat,
+                                                                param,
                                                                 data_test, [ch])
                                                 parameter, loglike, sigma_hat, \
                                                 _, _, _  = \
@@ -144,17 +143,20 @@ class ARXmodelfit(object):
                                                 hyperparameters.append([k,
                                                                         self.tau,
                                                     self.delays, self.compOrder])
-                                                error.append(sigma_hat)
+                                                error.append(sigma_hat[0])
                                                 auc.append(auc_)
                         # Find the optimal ARorder, tau, delay, and compOrder according to AUC
                         indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
                         indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
-                        self.tau = hyperparameters[indx1[indx2]][1]
-                        self.delays = hyperparameters[indx1[indx2]][2]
-                        self.compOrder = hyperparameters[indx1[indx2]][3]
-                        hyperparameters = []
-                        hyperparameters.append([k, self.tau, self.delays,
-                                                self.compOrder])
+
+                        if indx1 and indx2:
+                            self.tau = hyperparameters[indx1[indx2[0]]][1]
+                            self.delays = hyperparameters[indx1[indx2[0]]][2]
+                            self.compOrder = hyperparameters[indx1[indx2[0]]][3]
+                            hyperparameters = []
+                            hyperparameters.append([k, self.tau, self.delays,
+                                                    self.compOrder])
+
                         nParam = [k, k + sum(self.compOrder),
                                   k + sum(self.compOrder) + 1]
                         _, L, _, _, _, _ = self.cyclic_decent_method(data_test, ch)
@@ -162,22 +164,23 @@ class ARXmodelfit(object):
                         bic.append(L + k*np.log(numSeq_train*(numSeq_test - k)))
 
                     indx = [i for i in range(len(bic)) if bic[i] == min(bic)]
-                    self.ARorder = AR_range[indx]
-                    self.tau = hyperparameters[indx][1]
-                    self.delays = hyperparameters[indx][2]
-                    self.compOrder = hyperparameters[indx][3]
+                    self.ARorder = AR_range[indx[0]]
+                    self.tau = hyperparameters[indx[0]][1]
+                    self.delays = hyperparameters[indx[0]][2]
+                    self.compOrder = hyperparameters[indx[0]][3]
 
                 nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
-                parameter_hat[f,ch], _, _, _, _, _ = \
+                param, _, _, _, _, _ = \
                     self.cyclic_decent_method(data_train, ch)
+                parameter_hat[f,0:nParam[-1],ch] = param[:,0]
                 auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
-                    self.model_eval(parameter_hat[f,ch], data_test, ch)
+                    self.model_eval(param, data_test, [ch])
                 score.append(score_)
                 trialTargetness.append(trialTargetness_ch)
 
             data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
-            auc[f], acc[f], _, _ = self.model_eval(parameter_hat[f, :],
+            auc[f], acc[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
                                          data_test, self.channels)
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
@@ -188,10 +191,11 @@ class ARXmodelfit(object):
 
         # Make the Progress Bar final
         prog.end()
+        parameters = np.zeros((len(self.channels), nParam[-1]))
         # Pick best parameters for each channel/brain source
         for ch in range(len(self.channels)):
             best_ind = [i for i in range(nFold) if auc_ch[:, ch] == max(auc_ch[:, ch])]
-            parameters = parameter_hat[best_ind, ch]
+            parameters[ch, :] = parameter_hat[best_ind, ch, 0:nParam[-1]]
 
         return auc, acc, parameters
 
@@ -267,7 +271,7 @@ class ARXmodelfit(object):
             else:
                 if self.paradigm == "FRP":
                     testIndx = range(int(f*np.floor(foldSampSize/2)),
-                                     int((f+1)*np.floor(foldSampSize/2)+1))
+                                     int((f+1)*np.floor(foldSampSize/2)))
                     testIndx_pos = min(len(ind_frp_pos), len(testIndx))
                     testIndx_neg = min(len(ind_frp_neg), len(testIndx))
                     y_test_pos = copy(y_train_pos[:,:,testIndx_pos])
@@ -296,10 +300,10 @@ class ARXmodelfit(object):
                     ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
                 else:
                     testIndx = range(int(f*np.floor(foldSampSize)),
-                                     int((f+1)*np.floor(foldSampSize)+1))
+                                     int((f+1)*np.floor(foldSampSize)))
                     y_test.append(y_train_[:,:,testIndx])
                     us_test.append(us_train_[:,testIndx])
-                    ue_test.append(ue_train_[0,testIndx])
+                    ue_test.append(ue_train_[:,testIndx])
                     tmp = copy(y_train_)
                     y_train.append(np.delete(tmp, testIndx, 2))
                     tmp = copy(us_train_)
@@ -358,7 +362,7 @@ class ARXmodelfit(object):
                                                       us[:,seq], us[:,seq],
                                                                parameter)
             else:
-                targetLoc = ue[seq]
+                targetLoc = ue[0,seq]
                 possibleTarget = np.concatenate(([0], us[:,seq]))
                 for trial in range(self.numTrial+1):
                     if np.abs(possibleTarget[trial] - targetLoc) < 3:
@@ -790,6 +794,79 @@ class ARXmodelfit(object):
 
         return log_score
 
+    def multiChanenelCoeff(self, scores, label, nFold = 10):
+        """
+        Takes scores from ch number of channel or brain sources and N number of
+        trials and compute the coefficients of Lasso Logistic Regression.
+            Input Args:
+                scores: classifier scores
+                labels: true labels
+                nFold: number of folds for cross validation
+            Return:
+                auc_mean: mean of AUC values across n folds after learning
+                          hyperparamter
+                auc_std: std of AUC values across n folds after learning
+                        hyperparamter
+                coeff: coefficient of determination R^2 of the prediction
+                alp: hyperparameter of Ridge regression
+
+        """
+        # Initialization
+        auc = []
+        auc_mean = []
+        auc_std = []
+        # Shuffling scores
+        n = scores.shape[0]
+        indx = np.random.permutation(n)
+        score_sh = scores[indx,:]
+        label_sh = label[indx.:]
+        k = [i*.01 for i in range(100)]
+        k = k + [2., 5., 10.]
+        # Fold creation
+        stp = np.floor(n/nFold)
+        auc = np.zeros((nFold,1))
+        acc = np.zerps((nFold,1))
+
+        for j in k:
+            for i in range(nFold):
+                dummy_score = score_sh
+                dummy_label = label_sh
+                if i==nFold:
+                    indx = [q for q in range(i*stp,n)]
+                    score_test = dummy_score[indx,:]
+                    label_test = dummy_label[indx,:]
+                    np.delete(dummy_score, indx, 1)
+                    np.delete(dummy_label, indx, 1)
+                else:
+                    indx = [q for q in range(i*stp,(i+1)*stp)]
+                    score_test = dummy_score[indx,:]
+                    label_test = dummy_label[indx,:]
+                    np.delete(dummy_score, indx, 1)
+                    np.delete(dummy_label, indx, 1)
+
+                score_train = dummy_score
+                label_train = dummy_label
+                # Apply ridge regression to estimate the coefficients
+                clf = linear_model.Ridge(alpha=j)
+                clf.fit(score_train, label_train)
+                coeff = clf.coef_
+                score_pred = np.matmul(score_test, coeff)
+                # Compute AUC
+                auc.append(self.calculateAUC(score_pred, label_test))
+            # Compute mean and std of mean over n folds
+            auc_mean.append(np.mean(auc))
+            auc.std.append(np.std(auc))
+        # Find the best regularization parameter (hyperparamter)
+        indx = [q for q in range(len(k)) if auc_mean[0,q]==max(auc_mean)]
+        alp = k[indx]
+        # Apply again ridge regression with the learned hyperparamter
+        coeff = []
+        clf = linear_model.Ridge(alpha=alp)
+        clf.fit(score_sh, label_sh)
+        coeff = clf.coef_
+
+        return max(auc_mean), auc_std[0,indx], coeff, alp
+
     def arburg(self, x):
         """
         AR parameter estimation via Burg method.
@@ -917,7 +994,7 @@ class ARXmodelfit(object):
         # Predicting labels according to the scores
         for s in range(numSamp):
             sc = scores[:,s]
-            indx = [i for i in range(self.numTrial) if sc[i] == min(sc)]
+            indx = [i for i in range(self.numTrial+1) if sc[i] == min(sc)]
             sc = np.zeros(self.numTrial+1)
             try:
                 sc[indx[0]] = 1
@@ -925,7 +1002,7 @@ class ARXmodelfit(object):
                 tt = 1
             err_sum += np.sum(np.abs(sc - labels[:,s]))
 
-        acc = 1 - err_sum/(numSamp*self.numTrial)
+        acc = 1 - err_sum/(numSamp*(self.numTrial+1))
 
         return acc
 
