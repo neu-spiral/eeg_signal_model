@@ -174,12 +174,16 @@ class ARXmodelfit(object):
                 param, _, _, _, _, _ = \
                     self.cyclic_decent_method(data_train, ch)
                 parameter_hat[f,0:nParam[-1],ch] = param[:,0]
-                auc_ch[f,ch], acc_ch, score_, trialTargetness_ch = \
+                auc_ch[f,ch], acc_ch, score_, trialTargetness = \
                     self.model_eval(param, data_test, [ch])
                 score.append(score_)
-                trialTargetness.append(trialTargetness_ch)
 
-            data_test["coeff"] = self.multiChanenelCoeff(score, trialTargetness)
+            scores = np.zeros((score[0].shape[0],2)) # len(self.channels)))
+
+            for ch in range(2):#range(len(self.channels)):
+                scores[:,ch] = score[ch]
+
+            _, _,data_test["coeff"],_ = self.multiChanenelCoeff(scores, trialTargetness)
             auc[f], acc[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
                                          data_test, self.channels)
 
@@ -819,13 +823,13 @@ class ARXmodelfit(object):
         n = scores.shape[0]
         indx = np.random.permutation(n)
         score_sh = scores[indx,:]
-        label_sh = label[indx.:]
+        label_sh = label[indx]
         k = [i*.01 for i in range(100)]
         k = k + [2., 5., 10.]
         # Fold creation
-        stp = np.floor(n/nFold)
+        stp = int(np.floor(n/nFold))
         auc = np.zeros((nFold,1))
-        acc = np.zerps((nFold,1))
+        acc = np.zeros((nFold,1))
 
         for j in k:
             for i in range(nFold):
@@ -834,22 +838,22 @@ class ARXmodelfit(object):
                 if i==nFold:
                     indx = [q for q in range(i*stp,n)]
                     score_test = dummy_score[indx,:]
-                    label_test = dummy_label[indx,:]
-                    np.delete(dummy_score, indx, 1)
-                    np.delete(dummy_label, indx, 1)
+                    label_test = dummy_label[indx]
+                    np.delete(dummy_score, indx, 0)
+                    np.delete(dummy_label, indx, 0)
                 else:
                     indx = [q for q in range(i*stp,(i+1)*stp)]
                     score_test = dummy_score[indx,:]
-                    label_test = dummy_label[indx,:]
-                    np.delete(dummy_score, indx, 1)
-                    np.delete(dummy_label, indx, 1)
+                    label_test = dummy_label[indx]
+                    np.delete(dummy_score, indx, 0)
+                    np.delete(dummy_label, indx, 0)
 
                 score_train = dummy_score
                 label_train = dummy_label
                 # Apply ridge regression to estimate the coefficients
                 clf = linear_model.Ridge(alpha=j)
                 clf.fit(score_train, label_train)
-                coeff = clf.coef_
+                coeff = clf.coef_[0]
                 score_pred = np.matmul(score_test, coeff)
                 # Compute AUC
                 auc.append(self.calculateAUC(score_pred, label_test))
@@ -863,7 +867,7 @@ class ARXmodelfit(object):
         coeff = []
         clf = linear_model.Ridge(alpha=alp)
         clf.fit(score_sh, label_sh)
-        coeff = clf.coef_
+        coeff = clf.coef_[0]
 
         return max(auc_mean), auc_std[0,indx], coeff, alp
 
