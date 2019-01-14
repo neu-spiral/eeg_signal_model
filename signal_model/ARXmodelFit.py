@@ -4,6 +4,11 @@ from copy import copy
 from sklearn import metrics, linear_model
 import pyprog
 
+eps = np.power(.1, 7)
+CRED = '\033[31m'
+CEND = '\033[0m'
+
+#warnings.filterwarnings("ignore")
 
 class ARXmodelfit(object):
     """ Given the EEG data and visual stimuli information across sequences, this class fits an ARX model to EEG signals
@@ -28,7 +33,8 @@ class ARXmodelfit(object):
         """
 
     def __init__(self, fs, paradigm, numTrial, numSeq, numSamp, hyperparameter,
-                 channels, threshold=1e-6, orderSelection=False):
+                 channels, threshold=1e-6, orderSelection=False,
+                 visualization=False):
         self.fs = fs
         self.paradigm = paradigm
         self.channels = channels
@@ -49,6 +55,7 @@ class ARXmodelfit(object):
 
         self.threshold = threshold
         self.orderSelection = orderSelection
+        self.visuallization = visualization
 
 
     def ARXmodelfit(self, data, nFold = 10):
@@ -62,8 +69,8 @@ class ARXmodelfit(object):
                 orderSelection: True if you want to set hyperparmeters by BIC
                                 and grid search (boolean)
             Return:
-                auc: AUC of the classifier at each fold (nFold x 1)
-                acc: accuracy of the classifier at each fold (nFold x 1)
+                AUC: AUC of the classifier at each fold (nFold x 1)
+                ACC: accuracy of the classifier at each fold (nFold x 1)
                 parameters: best parameters for each channel/brain sources
         """
         eeg = data["timeseries"]
@@ -71,8 +78,8 @@ class ARXmodelfit(object):
         targetOnsets = data["targetOnset"]
         # Initialization
         auc_ch = np.zeros((nFold, len(self.channels)))
-        auc = np.zeros((nFold, 1))
-        acc = np.zeros((nFold, 1))
+        AUC = np.zeros((nFold, 1))
+        ACC = np.zeros((nFold, 1))
         parameter_hat = np.zeros((nFold, 100, len(self.channels)))               # the maximum size of the parameters assumed to be 100
         trialTargetness = []
         score = []
@@ -184,8 +191,8 @@ class ARXmodelfit(object):
                 scores[:,ch] = score[ch]
 
             _, _,data_test["coeff"],_ = self.multiChanenelCoeff(scores, trialTargetness)
-            auc[f], acc[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
-                                         data_test, self.channels)
+            AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
+                                         data_test, range(2)) #range(len(self.channels)))
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
             # Set current status
@@ -198,10 +205,10 @@ class ARXmodelfit(object):
         parameters = np.zeros((len(self.channels), nParam[-1]))
         # Pick best parameters for each channel/brain source
         for ch in range(len(self.channels)):
-            best_ind = [i for i in range(nFold) if auc_ch[:, ch] == max(auc_ch[:, ch])]
-            parameters[ch, :] = parameter_hat[best_ind, ch, 0:nParam[-1]]
+            best_ind = [i for i in range(nFold) if auc_ch[i, ch] == max(auc_ch[:, ch])]
+            parameters[ch, :] = parameter_hat[best_ind[0], 0:nParam[-1], ch]
 
-        return auc, acc, parameters
+        return AUC, ACC, parameters
 
     def data_for_corssValidation(self, data, nFold = 10):
         """
@@ -238,14 +245,20 @@ class ARXmodelfit(object):
         ue_test = []
 
         if self.paradigm == "FRP":
-            ind_frp_neg = [i for i in range(self.numSeq) if targetOnsets_sh[i] > 0]
-            ind_frp_pos = [i for i in range(self.numSeq) if targetOnsets_sh[i] == 0]
+            ind_frp_neg = [i for i in range(self.numSeq) if targetOnsets_sh[0,i] > 0]
+            ind_frp_pos = [i for i in range(self.numSeq) if targetOnsets_sh[0,i] == 0]
             y_train_pos = eeg_sh[:,:,ind_frp_pos]
             y_train_neg = eeg_sh[:,:,ind_frp_neg]
             us_train_pos = trigOnsets_sh[:,ind_frp_pos]
             us_train_neg = trigOnsets_sh[:,ind_frp_neg]
-            ue_train_pos = targetOnsets_sh[ind_frp_pos]
-            ue_train_neg = targetOnsets_sh[ind_frp_neg]
+            ue_train_pos = targetOnsets_sh[0,ind_frp_pos]
+            ue_train_neg = targetOnsets_sh[0,ind_frp_neg]
+            y_train_pos_ = copy(y_train_pos)
+            y_train_neg_ = copy(y_train_neg)
+            us_train_pos_ = copy(us_train_pos)
+            us_train_neg_ = copy(us_train_neg)
+            ue_train_pos_ = copy(ue_train_pos)
+            ue_train_neg_ = copy(ue_train_neg)
         else:
             y_train_ = copy(eeg_sh)
             us_train_ = copy(trigOnsets_sh)
@@ -276,28 +289,37 @@ class ARXmodelfit(object):
                 if self.paradigm == "FRP":
                     testIndx = range(int(f*np.floor(foldSampSize/2)),
                                      int((f+1)*np.floor(foldSampSize/2)))
-                    testIndx_pos = min(len(ind_frp_pos), len(testIndx))
-                    testIndx_neg = min(len(ind_frp_neg), len(testIndx))
-                    y_test_pos = copy(y_train_pos[:,:,testIndx_pos])
-                    y_test_neg = copy(y_train_neg[:,:,testIndx_neg])
-                    us_test_pos = copy(us_train_pos[:,testIndx_pos])
-                    us_test_neg = copy(us_train_neg[:,testIndx_neg])
-                    ue_test_pos = copy(ue_train_pos[testIndx_pos])
-                    ue_test_neg = copy(ue_train_neg[testIndx_neg])
+
+                    testIndx_neg = testIndx
+                    testIndx_pos = testIndx
+                    indx_neg = [ti for ti in range(len(testIndx)) if testIndx[ti] > len(ind_frp_neg)-1]
+                    indx_pos = [ti for ti in range(len(testIndx)) if testIndx[ti] > len(ind_frp_pos)-1]
+
+                    if indx_neg:
+                        testIndx_neg = testIndx[:indx_neg[0]]
+                    if indx_pos:
+                        testIndx_pos = testIndx[:indx_pos[0]]
+
+                    y_test_pos = copy(y_train_pos_[:,:,testIndx_pos])
+                    y_test_neg = copy(y_train_neg_[:,:,testIndx_neg])
+                    us_test_pos = copy(us_train_pos_[:,testIndx_pos])
+                    us_test_neg = copy(us_train_neg_[:,testIndx_neg])
+                    ue_test_pos = copy(ue_train_pos_[testIndx_pos])
+                    ue_test_neg = copy(ue_train_neg_[testIndx_neg])
                     y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
                     us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
                     ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
-                    tmp = copy(y_train_pos)
+                    tmp = copy(y_train_pos_)
                     y_train_pos = np.delete(tmp, testIndx_pos, 2)
-                    tmp = copy(y_train_neg)
+                    tmp = copy(y_train_neg_)
                     y_train_neg = np.delete(tmp, testIndx_neg, 2)
-                    tmp = copy(us_train_pos)
+                    tmp = copy(us_train_pos_)
                     us_train_pos = np.delete(tmp, testIndx_pos, 1)
-                    tmp = copy(us_train_neg)
+                    tmp = copy(us_train_neg_)
                     us_train_neg = np.delete(tmp, testIndx_neg, 1)
-                    tmp = copy(ue_train_pos)
+                    tmp = copy(ue_train_pos_)
                     ue_train_pos = np.delete(tmp, testIndx_pos, 0)
-                    tmp = copy(ue_train_neg)
+                    tmp = copy(ue_train_neg_)
                     ue_train_neg = np.delete(tmp, testIndx_neg, 0)
                     y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
                     us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
@@ -382,8 +404,12 @@ class ARXmodelfit(object):
             for ch in range(len(channel)):
                 sc[ch,:] = np.matmul(np.array([[-1,1]]), (-1)*loglikelihood[:,:,ch].T)
 
-            # combining multi-channels/brain sources
-            scores = np.matmul(coeff.T, sc)
+            if len(channel) > 1:
+                # combining multi-channels/brain sources
+                scores = np.matmul(coeff, sc)
+            else:
+                scores = copy(sc[0])
+
             auc = self.calculateAUC(scores, label)
             acc = self.calculateACC(scores, label)
             trialTargetness = label
@@ -398,13 +424,12 @@ class ARXmodelfit(object):
                     except:
                         tt = 1
 
-
                 score[ch,:] = np.reshape(sc,(self.numTrial+1)*numSeq,1)
 
-            #if coeff == 1:
-            scores = copy(score[0])
-            #else:
-            #   scores = np.matmul(coeff, score)
+            if len(channel) > 1:
+                scores = np.matmul(score.T, coeff)
+            else:
+                scores = copy(score[0])
 
             t_target = np.reshape(trialTargetness,(self.numTrial+1)*numSeq,1)
             auc = self.calculateAUC(scores, t_target)
@@ -487,7 +512,7 @@ class ARXmodelfit(object):
                         self.gammafunction(input_p, self.compOrder[1], self.tau[1])
                     z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
                         self.gammafunction(input_q, self.compOrder[2], self.tau[2])
-                elif self.paradigm == "ERP":
+                else:
                     if data["targetOnset"][0][s] > 0:
                         input_p = data["targetOnset"][0][s] + self.delays[1]
                         input_q = data["targetOnset"][0][s] + self.delays[2]
@@ -501,10 +526,6 @@ class ARXmodelfit(object):
 
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
                     z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
-                else:
-                    warnings.warn(
-                        "Please enter a valid paradigm e.g., FRP or ERP!")
-                    break
 
                 # updates the design matrix according to the target/non-target stimuli onsets
                 X.append(z.T)
@@ -732,7 +753,7 @@ class ARXmodelfit(object):
         Ix = np.identity(N)
         z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
         ar_hat = np.zeros((self.numSamp, 1))
-        log_score = np.zeros((y.shape[0], 1))
+        log_score = np.zeros((y.shape[0]))
         nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
         # VEP components
@@ -793,8 +814,8 @@ class ARXmodelfit(object):
                 Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
                                                               arProcess_hat))
-                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
-                log_score[ch] = logdG + error / sigma_hat
+                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat + eps)
+                log_score[ch] = logdG + error / (sigma_hat + eps)
 
         return log_score
 
@@ -816,7 +837,6 @@ class ARXmodelfit(object):
 
         """
         # Initialization
-        auc = []
         auc_mean = []
         auc_std = []
         # Shuffling scores
@@ -828,10 +848,9 @@ class ARXmodelfit(object):
         k = k + [2., 5., 10.]
         # Fold creation
         stp = int(np.floor(n/nFold))
-        auc = np.zeros((nFold,1))
-        acc = np.zeros((nFold,1))
 
         for j in k:
+            auc = []
             for i in range(nFold):
                 dummy_score = score_sh
                 dummy_label = label_sh
@@ -851,25 +870,28 @@ class ARXmodelfit(object):
                 score_train = dummy_score
                 label_train = dummy_label
                 # Apply ridge regression to estimate the coefficients
+                clf = []
                 clf = linear_model.Ridge(alpha=j)
                 clf.fit(score_train, label_train)
-                coeff = clf.coef_[0]
+                coeff = clf.coef_
                 score_pred = np.matmul(score_test, coeff)
                 # Compute AUC
                 auc.append(self.calculateAUC(score_pred, label_test))
             # Compute mean and std of mean over n folds
-            auc_mean.append(np.mean(auc))
-            auc.std.append(np.std(auc))
+            auc_ = [a for a in auc if ~np.isnan(a)]
+            auc_mean.append(np.mean(auc_))
+            auc_std.append(np.std(auc_))
         # Find the best regularization parameter (hyperparamter)
-        indx = [q for q in range(len(k)) if auc_mean[0,q]==max(auc_mean)]
-        alp = k[indx]
+        indx = [q for q in range(len(k)) if auc_mean[q]==max(auc_mean)]
+        alp = k[indx[0]]
         # Apply again ridge regression with the learned hyperparamter
         coeff = []
+        clf = []
         clf = linear_model.Ridge(alpha=alp)
         clf.fit(score_sh, label_sh)
-        coeff = clf.coef_[0]
+        coeff = clf.coef_
 
-        return max(auc_mean), auc_std[0,indx], coeff, alp
+        return max(auc_mean), auc_std[indx[0]], coeff, alp
 
     def arburg(self, x):
         """
