@@ -80,7 +80,7 @@ class ARXmodelfit(object):
         auc_ch = np.zeros((nFold, len(self.channels)))
         AUC = np.zeros((nFold, 1))
         ACC = np.zeros((nFold, 1))
-        parameter_hat = np.zeros((nFold, 100, len(self.channels)))               # the maximum size of the parameters assumed to be 100
+        parameter_hat = np.zeros((nFold, 300, len(self.channels)))               # the maximum size of the parameters assumed to be 300
         trialTargetness = []
         score = []
 
@@ -143,7 +143,7 @@ class ARXmodelfit(object):
                                                 auc_, _,_,_ = self.model_eval(
                                                                 param,
                                                                 data_test, [ch])
-                                                parameter, loglike, sigma_hat, \
+                                                _, loglike, sigma_hat, \
                                                 _, _, _  = \
                                                     self.cyclic_decent_method(
                                                                  data_test, ch)
@@ -180,7 +180,11 @@ class ARXmodelfit(object):
                           self.ARorder + sum(self.compOrder) + 1]
                 param, _, _, _, _, _ = \
                     self.cyclic_decent_method(data_train, ch)
-                parameter_hat[f,0:nParam[-1],ch] = param[:,0]
+                if self.paradigm == "FRP":
+                    parameter_hat[f,0:2*nParam[-1],ch] = param[:,0]
+                else:
+                    parameter_hat[f,0:nParam[-1],ch] = param[:,0]
+
                 auc_ch[f,ch], acc_ch, score_, trialTargetness = \
                     self.model_eval(param, data_test, [ch])
                 score.append(score_)
@@ -191,7 +195,11 @@ class ARXmodelfit(object):
                 scores[:,ch] = score[ch]
 
             _, _,data_test["coeff"],_ = self.multiChanenelCoeff(scores, trialTargetness)
-            AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
+            if self.paradigm == "FRP":
+                AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:2*nParam[-1],:],
+                                         data_test, range(2)) #range(len(self.channels)))
+            else:
+                AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
                                          data_test, range(2)) #range(len(self.channels)))
 
             #print("AUC:  | ACC: ".format(auc[f], acc[f]))
@@ -202,15 +210,21 @@ class ARXmodelfit(object):
 
         # Make the Progress Bar final
         prog.end()
-        parameters = np.zeros((len(self.channels), nParam[-1]))
+        if self.paradigm == "FRP":
+            parameters = np.zeros((len(self.channels), 2*nParam[-1]))
+        else:
+            parameters = np.zeros((len(self.channels), nParam[-1]))
         # Pick best parameters for each channel/brain source
         for ch in range(len(self.channels)):
             best_ind = [i for i in range(nFold) if auc_ch[i, ch] == max(auc_ch[:, ch])]
-            parameters[ch, :] = parameter_hat[best_ind[0], 0:nParam[-1], ch]
+            if self.paradigm == "FRP":
+                parameters[ch, :] = parameter_hat[best_ind[0], 0:2*nParam[-1], ch]
+            else:
+                parameters[ch, :] = parameter_hat[best_ind[0], 0:nParam[-1], ch]
 
         return AUC, ACC, parameters
 
-    def data_for_corssValidation(self, data, nFold = 10):
+    def data_for_corssValidation(self, data, nFold=10):
         """
         Generates K dictionary dataset for cross validation
             Input Args:
@@ -251,8 +265,8 @@ class ARXmodelfit(object):
             y_train_neg = eeg_sh[:,:,ind_frp_neg]
             us_train_pos = trigOnsets_sh[:,ind_frp_pos]
             us_train_neg = trigOnsets_sh[:,ind_frp_neg]
-            ue_train_pos = targetOnsets_sh[0,ind_frp_pos]
-            ue_train_neg = targetOnsets_sh[0,ind_frp_neg]
+            ue_train_pos = targetOnsets_sh[:,ind_frp_pos]
+            ue_train_neg = targetOnsets_sh[:,ind_frp_neg]
             y_train_pos_ = copy(y_train_pos)
             y_train_neg_ = copy(y_train_neg)
             us_train_pos_ = copy(us_train_pos)
@@ -277,10 +291,10 @@ class ARXmodelfit(object):
                     ue_test_neg = copy(ue_train_neg)
                     y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
                     us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
-                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
+                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),1))
                     y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
                     us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
-                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
+                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),1))
                 else:
                     y_test.append(y_train_)
                     us_test.append(us_train_)
@@ -289,7 +303,6 @@ class ARXmodelfit(object):
                 if self.paradigm == "FRP":
                     testIndx = range(int(f*np.floor(foldSampSize/2)),
                                      int((f+1)*np.floor(foldSampSize/2)))
-
                     testIndx_neg = testIndx
                     testIndx_pos = testIndx
                     indx_neg = [ti for ti in range(len(testIndx)) if testIndx[ti] > len(ind_frp_neg)-1]
@@ -304,11 +317,11 @@ class ARXmodelfit(object):
                     y_test_neg = copy(y_train_neg_[:,:,testIndx_neg])
                     us_test_pos = copy(us_train_pos_[:,testIndx_pos])
                     us_test_neg = copy(us_train_neg_[:,testIndx_neg])
-                    ue_test_pos = copy(ue_train_pos_[testIndx_pos])
-                    ue_test_neg = copy(ue_train_neg_[testIndx_neg])
+                    ue_test_pos = copy(ue_train_pos_[:,testIndx_pos])
+                    ue_test_neg = copy(ue_train_neg_[:,testIndx_neg])
                     y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
                     us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
-                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),0))
+                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),1))
                     tmp = copy(y_train_pos_)
                     y_train_pos = np.delete(tmp, testIndx_pos, 2)
                     tmp = copy(y_train_neg_)
@@ -318,12 +331,12 @@ class ARXmodelfit(object):
                     tmp = copy(us_train_neg_)
                     us_train_neg = np.delete(tmp, testIndx_neg, 1)
                     tmp = copy(ue_train_pos_)
-                    ue_train_pos = np.delete(tmp, testIndx_pos, 0)
+                    ue_train_pos = np.delete(tmp, testIndx_pos, 1)
                     tmp = copy(ue_train_neg_)
-                    ue_train_neg = np.delete(tmp, testIndx_neg, 0)
+                    ue_train_neg = np.delete(tmp, testIndx_neg, 1)
                     y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
                     us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
-                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),0))
+                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),1))
                 else:
                     testIndx = range(int(f*np.floor(foldSampSize)),
                                      int((f+1)*np.floor(foldSampSize)))
@@ -370,23 +383,28 @@ class ARXmodelfit(object):
         else:
             loglikelihood = np.zeros((numSeq, self.numTrial+1, len(channel)))
             trialTargetness = np.zeros((numSeq, self.numTrial+1))
+
         # Computing loglikehood scores for each possible target location
         for seq in range(numSeq):
             if self.paradigm == "FRP":
-                if us[seq] > 0:
-                    label[seq] = 1
+                # negative sequences
+                if ue[0,seq] > 0:
+                    label[seq,0] = 1
                     trialTargetness[seq,1] = 1
                     trialTargetness[seq,0] = 0
+                # positive sequences
                 else:
-                    label[seq] = 0
+                    label[seq,0] = 0
                     trialTargetness[seq,1] = 0
                     trialTargetness[seq,0] = 1
 
+                len_param = parameter.shape[0]/2
+                # compute loglikelihood score for positive sequences
                 loglikelihood[seq,0,:] = self.loglikelihoodARX(y[channel,:,seq],
-                                                      us[:,seq], 0, parameter)
+                                         us[:,seq], [], parameter[:len_param,:])
+                # compute loglikelihood score for negative sequences
                 loglikelihood[seq,1,:] = self.loglikelihoodARX(y[channel,:,seq],
-                                                      us[:,seq], us[:,seq],
-                                                               parameter)
+                                         us[:,seq], [], parameter[len_param:,:])
             else:
                 targetLoc = ue[0,seq]
                 possibleTarget = np.concatenate(([0], us[:,seq]))
@@ -402,17 +420,18 @@ class ARXmodelfit(object):
         # Computing auc and acc of the classifier
         if self.paradigm == "FRP":
             for ch in range(len(channel)):
-                sc[ch,:] = np.matmul(np.array([[-1,1]]), (-1)*loglikelihood[:,:,ch].T)
+                sc[ch,:] = np.matmul(np.array([[-1.,1.]]), (-1)*loglikelihood[:,:,ch].T)
 
             if len(channel) > 1:
                 # combining multi-channels/brain sources
                 scores = np.matmul(coeff, sc)
             else:
                 scores = copy(sc[0])
+                scores = np.expand_dims(scores, 0)
 
-            auc = self.calculateAUC(scores, label)
-            acc = self.calculateACC(scores, label)
-            trialTargetness = label
+            auc, acc, _, _ = self.calculateROC(scores[0,:], label[:,0])
+            #acc = self.calculateACC(scores, label[:,0])
+            trialTargetness = label[:,0]
 
         else:
             for ch in range(len(channel)):
@@ -432,7 +451,7 @@ class ARXmodelfit(object):
                 scores = copy(score[0])
 
             t_target = np.reshape(trialTargetness,(self.numTrial+1)*numSeq,1)
-            auc = self.calculateAUC(scores, t_target)
+            auc, acc2, _, _ = self.calculateROC(scores, t_target)
             ss = np.reshape(scores,((self.numTrial+1),numSeq))
             tt = np.reshape(t_target,((self.numTrial+1),numSeq))
             acc = self.calculateACC(ss, tt)
@@ -581,7 +600,7 @@ class ARXmodelfit(object):
                 # check the experiment paradigm
                 if self.paradigm == "FRP":
                     # separate positive and negative FRP sequences
-                    if data["targetOnset"][s] > 0:
+                    if data["targetOnset"][0][s] > 0:
                         # negative sequences
                         matY_neg += np.matmul(X[s].T,
                                               np.matmul(Q_inv_s[s],
@@ -618,8 +637,9 @@ class ARXmodelfit(object):
         alpha_hat = np.expand_dims((-1) * ar_coeff[0, 1:], 1)
         sigma_hat = np.expand_dims(np.expand_dims(sigma_hat, 1), 1)
         if self.paradigm == "FRP":
-            parameter = np.concatenate((alpha_hat, beta_hat_pos, sigma_hat))
-            parameter = np.concatenate((alpha_hat, beta_hat_neg, sigma_hat))
+            parameter_pos = np.concatenate((alpha_hat, beta_hat_pos, sigma_hat))
+            parameter_neg = np.concatenate((alpha_hat, beta_hat_neg, sigma_hat))
+            parameter = np.concatenate((parameter_pos,parameter_neg))
 
         if self.paradigm == "ERP":
             parameter = np.concatenate((alpha_hat, beta_hat, sigma_hat))
@@ -771,23 +791,19 @@ class ARXmodelfit(object):
                 self.gammafunction(input_p, self.compOrder[1], self.tau[1])
             z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
                 self.gammafunction(input_q, self.compOrder[2], self.tau[2])
-            if ue > 0:
-                ind = 2
-            else:
-                ind = 1
             # compute scores for each channel
             for ch in range(y.shape[0]):
                 beta = parameter[nParam[0]:nParam[1], ch]
                 sigma_hat = parameter[-1, ch]
-                # estimated VEP & ERP terms
-                sig_hat = np.matmul(z.T, beta[:, 1])
+                # estimated VEP & FRP terms
+                sig_hat = np.matmul(z.T, beta)
                 # AR series - is this ar_hat + res_hat
-                arProcess_hat = y[self.ARorder:, 1] - sig_hat
+                arProcess_hat = y[ch, self.ARorder:] - sig_hat
                 Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
                                                               arProcess_hat))
-                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat)
-                log_score[ch] = logdG + error / sigma_hat
+                logdG = np.sum(np.log(D)) + N * np.log(sigma_hat + eps)
+                log_score[ch] = logdG + error / (sigma_hat + eps)
 
         else:
             if ue > 0:
@@ -876,7 +892,8 @@ class ARXmodelfit(object):
                 coeff = clf.coef_
                 score_pred = np.matmul(score_test, coeff)
                 # Compute AUC
-                auc.append(self.calculateAUC(score_pred, label_test))
+                tmp, _, _, _ = self.calculateROC(score_pred, label_test)
+                auc.append(tmp)
             # Compute mean and std of mean over n folds
             auc_ = [a for a in auc if ~np.isnan(a)]
             auc_mean.append(np.mean(auc_))
@@ -991,7 +1008,7 @@ class ARXmodelfit(object):
 
         return err, b
 
-    def calculateAUC(self, scores, labels):
+    def calculateROC(self, scores, labels):
         """
         Computes the area under the ROC curve (AUC) of a binary classifier.
             Input Args:
@@ -999,11 +1016,18 @@ class ARXmodelfit(object):
                 labels: true labels
             Return:
                 auc: the area under the ROC curve
+                acc: accuracy, number of correct assessments divided by number of all samples
+                sensitivity: number of true positive assessments divided by number of all positive samples
+                specificity: number of true negative assessments divided by number of all negative samples
         """
         fpr, tpr, _ = metrics.roc_curve(labels, scores, pos_label=1)
+        fnr, tnr, _ = metrics.roc_curve(labels, scores, pos_label=0)
         auc = metrics.auc(fpr, tpr)
+        acc = (np.sum(tpr) + np.sum(tnr))/len(labels)
+        sensitivity = np.sum(tpr) / len(labels[labels > 0])
+        specificity = np.sum(tnr) / len(labels[labels == 0])
 
-        return auc
+        return auc, acc, sensitivity, specificity
 
     def calculateACC(self, scores, labels):
         """
