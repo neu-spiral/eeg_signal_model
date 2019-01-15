@@ -8,33 +8,49 @@ eps = np.power(.1, 7)
 CRED = '\033[31m'
 CEND = '\033[0m'
 
-#warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")
 
 class ARXmodelfit(object):
-    """ Given the EEG data and visual stimuli information across sequences, this class fits an ARX model to EEG signals
+    """
+        Given the EEG data and visual stimuli information across sequences,
+        this class fits an ARX model to EEG signals.
+        For more information, check the following papers:
 
-        Attr:
-            ....
+        - Y. M. Marghi, et al., "A Parametric EEG Signal Model for BCIs with
+          Rapid-Trial Sequences", EMBC,2018.
+        - Y. M. Marghi, et al., "An Event-Driven AR-Process Model With
+          RapidTrial Sequences for EEG-based BCIs", TNSRE,2019.
 
-        Functions:
-            sequence_model():
-                t....
-            model_eval():
-                ...
-            cyclic_decent_method():
+        Attributes:
+            orderSelection ---> Boolean
+            paradigm ---> the experiment paradigm, either FRP or ERP, char
+            compOrder ---> polynomial order of the gamma function, int
+            threshold ---> convergence criteria in cyclyc decent method, double
+            channels ---> list of EEG channels or sources, char
+            numTrial ---> number of trial in a sequence, int
+            numSamp ---> number of data sample in a sequence, int
+            ARorder ---> AR model order, could be a vector or scaler, int
+            delays --->  delays of gamma functions, vector, double
+            numSeq ---> total number of sequences, int
+            tau --->  Kurtosis of gamma functions, vector, int
+            fs ---> sampling frequency, scaler real value, double
 
-            gammafunction():
-
-            invCov():
-
-            loglikelihood():
-
-            auc():
-        """
+        Methods:
+            data_for_corssValidation
+            cyclic_decent_method
+            multiChanenelCoeff
+            gammafunction
+            loglikelihood
+            calculateROC
+            calculateACC
+            model_eval
+            arburg_
+            arburg
+            invCov
+    """
 
     def __init__(self, fs, paradigm, numTrial, numSeq, numSamp, hyperparameter,
-                 channels, threshold=1e-6, orderSelection=False,
-                 visualization=False):
+                 channels, threshold=1e-6, orderSelection=False):
         self.fs = fs
         self.paradigm = paradigm
         self.channels = channels
@@ -55,13 +71,12 @@ class ARXmodelfit(object):
 
         self.threshold = threshold
         self.orderSelection = orderSelection
-        self.visuallization = visualization
 
 
     def ARXmodelfit(self, data, nFold = 10):
         """
-        fits an ARX model to the multi-channel/ brain sources timeseries signal
-        using the cyclic decent method
+            fits an ARX model to the multi-channel/ brain sources timeseries
+            signal using the cyclic decent method
             Input Args:
                 data: a dictionary including timeseries, onsets of stimuli,
                         and targets for all sequences
@@ -80,7 +95,8 @@ class ARXmodelfit(object):
         auc_ch = np.zeros((nFold, len(self.channels)))
         AUC = np.zeros((nFold, 1))
         ACC = np.zeros((nFold, 1))
-        parameter_hat = np.zeros((nFold, 300, len(self.channels)))               # the maximum size of the parameters assumed to be 300
+        # the maximum size of the parameters assumed to be 300
+        parameter_hat = np.zeros((nFold, 300, len(self.channels)))
         trialTargetness = []
         score = []
 
@@ -226,7 +242,7 @@ class ARXmodelfit(object):
 
     def data_for_corssValidation(self, data, nFold=10):
         """
-        Generates K dictionary dataset for cross validation
+            Generates K dictionary dataset for cross validation
             Input Args:
                 data: a dictionary including timeseries, onsets of stimuli,
                         and targets for all sequences
@@ -355,8 +371,8 @@ class ARXmodelfit(object):
 
     def model_eval(self, parameter, data, channel):
         """
-        with the final belief over the system, updates the querying method and
-        generates len_query most likely queries.
+            Evaluate the estimated parameters for ARX model using loglikelihood
+            measure.
             Input Args:
                 parameters: model parameters for each channel/brain sources
                 data: a dictionary including timeseries, onsets of stimuli,
@@ -366,7 +382,8 @@ class ARXmodelfit(object):
                 auc: AUC of the classifier
                 acc: accuracy of the classifier
                 scores: loglikelihood scores of of all trials
-                trialTargetness: represents targetness of each trial across all sequences
+                trialTargetness: represents targetness of each trial across
+                                 all sequences
         """
         numSeq = data["numSeq"]
         y = data["timeseries"]
@@ -427,9 +444,9 @@ class ARXmodelfit(object):
                 scores = np.matmul(coeff, sc)
             else:
                 scores = copy(sc[0])
-                scores = np.expand_dims(scores, 0)
+                scores = np.expand_dims(scores, 0)[0,:]
 
-            auc, acc, _, _ = self.calculateROC(scores[0,:], label[:,0])
+            auc, acc, _, _ = self.calculateROC(scores, label[:,0])
             #acc = self.calculateACC(scores, label[:,0])
             trialTargetness = label[:,0]
 
@@ -437,11 +454,8 @@ class ARXmodelfit(object):
             for ch in range(len(channel)):
                 ss = (-1)*loglikelihood[:,:,ch]
                 for seq in range(numSeq):
-                    try:
-                        sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
-                        sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
-                    except:
-                        tt = 1
+                    sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
+                    sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
 
                 score[ch,:] = np.reshape(sc,(self.numTrial+1)*numSeq,1)
 
@@ -451,7 +465,7 @@ class ARXmodelfit(object):
                 scores = copy(score[0])
 
             t_target = np.reshape(trialTargetness,(self.numTrial+1)*numSeq,1)
-            auc, acc2, _, _ = self.calculateROC(scores, t_target)
+            auc, _, _, _ = self.calculateROC(scores, t_target)
             ss = np.reshape(scores,((self.numTrial+1),numSeq))
             tt = np.reshape(t_target,((self.numTrial+1),numSeq))
             acc = self.calculateACC(ss, tt)
@@ -462,22 +476,27 @@ class ARXmodelfit(object):
 
     def cyclic_decent_method(self, data, channel):
         """
-        The cyclic descent algorithm is used for joint estimation f the AR(p) and design matrix coefficients.
-        For more information check out the following papers:
-            - W. Q. Malik, et al., Denoising two-photon calcium imaging data, PloS one, 2011.
-            - Y. M. Marghi, et al., A Parametric EEG Signal Model for BCIs with Rapid-Trial Sequences, EMBC, 2018.
+            The cyclic descent algorithm is used for joint estimation f the
+            AR(p) and design matrix coefficients.
+            For more information check out the following papers:
+            - W. Q. Malik, et al., "Denoising two-photon calcium imaging data",
+              PloS one, 2011.
+            - Y. M. Marghi, et al., "A Parametric EEG Signal Model for BCIs with
+              Rapid-Trial Sequences" EMBC, 2018.
 
             Input Args:
                 data: a dictionary including timeseries, onsets of stimuli,
-                    and targets for all sequences
+                      and targets for all sequences
                 channel: set of channels/brain sources (int)
             Return:
-                parameter: estimated parameters fpr the ARX model including AR parameters, gammafunction
+                parameter: estimated parameters fpr the ARX model including AR
+                           parameters, gammafunction
 
                 loglikelihood: loglikelihood scores
                 sigma_hat: estimation error
                 y_hat: synthetic eeg signal
-                signal_hat: estimated brain activities due to visual stimuli including VEP+ERP
+                signal_hat: estimated brain activities due to visual stimuli
+                            including VEP+ERP
                 s_hat: estimated AR process in the signal model
         """
         # Initialization
@@ -665,13 +684,13 @@ class ARXmodelfit(object):
 
     def gammafunction(self, x, compOrder, tau):
         """
-        Generates the brain impulse responses to the visual and target-related stimuli. Here it is assumed that
-        this response can be modeled by the gamma function  as follow:
+            Generates the brain impulse responses to the visual and this
+            response can be modeled by the gamma function  as follow:
 
                 f(n,tau,L) = sum_l(b_l*(n/l)^l*exp(-n/tau)) u[n]
 
-        for more information, please check equation (4) in "A Parametric EEG Signal Model for BCIs with Rapid-Trial
-        Sequences" paper.
+            for more information, please check equation (4) in "A Parametric
+            EEG Signal Model for BCIs with Rapid-Trial Sequences" paper.
             Input Args:
                 x: is Nx1
                 compOrder: order of the polynomial exponential function
@@ -715,8 +734,16 @@ class ARXmodelfit(object):
 
     def invCov(self, x, L_inv, w_inv):
         """
-        Calculate inverse of AR covariance matrix via LDR V is NXps ensemble of  residuals, Linv & Winv are
-        initialized to I_N
+            Calculate inverse of AR covariance matrix via LDR V is NXps ensemble
+            of residuals, Linv & Winv are initialized to I_N
+            Input Args:
+                x: a time series comes from AR process, Nx1
+                L_inv: order of the polynomial exponential function
+                w_inv: inverse covariance of AR(p)
+            Return:
+                w_inv: vectorized inverse covariance of AR(p) - Cholesky Form
+                d_vec: elements of diagonal matrix as per Levinson-Durbin recursion
+                q: error(p) as a output of arburg(x,P)
         """
         # Find AR coefficients
         err, b = self.arburg_(x)
@@ -728,18 +755,15 @@ class ARXmodelfit(object):
             L_invt[:ar + 1, ar + 1] = coef
 
         for ar in range(N - self.ARorder - 1):
-            try:
-                L_invt[ar + 1:ar + self.ARorder + 1, ar + self.ARorder] = coef
-            except:
-                tt = 1
+            L_invt[ar + 1:ar + self.ARorder + 1, ar + self.ARorder] = coef
 
-        # Elements of diagonal matrix as per Levinson-Durbin recursion
+        # Apply Levinson-Durbin recursion to get the diagonal elements
         x_xcov = np.cov(x, bias=False, ddof=0)
         d_vec = np.concatenate((np.array([[x_xcov]]), err), 0)
         d_inv = float(1) / d_vec
         q = err[-1]
         q_ = float(1) / q
-        # Vectorized inverse covariance of AR(p) - Cholesky Form
+        # Compute inverse covariance of AR(p) using Cholesky Form
         A = L_invt[:self.ARorder + 1, :self.ARorder + 1]
         B = L_invt[:self.ARorder + 1, self.ARorder + 1:self.numSamp]
         C = L_invt[self.ARorder + 1:self.numSamp, self.ARorder + 1:self.numSamp]
@@ -759,7 +783,7 @@ class ARXmodelfit(object):
 
     def loglikelihoodARX(self, y, us, ue, parameter):
         """
-        Computes the loglikelihood scores
+            Computes the loglikelihood scores
             Input Args:
                 y: time series of multi channel/brain sources measurement
                 us: trigger information of SSVEPs within sequences
@@ -837,8 +861,8 @@ class ARXmodelfit(object):
 
     def multiChanenelCoeff(self, scores, label, nFold = 10):
         """
-        Takes scores from ch number of channel or brain sources and N number of
-        trials and compute the coefficients of Lasso Logistic Regression.
+            Takes scores from ch number of channel or brain sources and N number
+            of trials and compute the coefficients of Lasso Logistic Regression.
             Input Args:
                 scores: classifier scores
                 labels: true labels
@@ -850,7 +874,6 @@ class ARXmodelfit(object):
                         hyperparamter
                 coeff: coefficient of determination R^2 of the prediction
                 alp: hyperparameter of Ridge regression
-
         """
         # Initialization
         auc_mean = []
@@ -912,19 +935,20 @@ class ARXmodelfit(object):
 
     def arburg(self, x):
         """
-        AR parameter estimation via Burg method.
-        A = ARBURG(X,ORDER) returns the coefficients of the AR parametric signal model estimate
-        of X using Burg's method. The model has order ORDER, and the output array A has ORDER+1 columns.
-        The coefficients along the Nth row of A model the Nth column of X.  If X is a vector then A is
-        a row vector.
+            AR parameter estimation via Burg method.
+            A = ARBURG(X,ORDER) returns the coefficients of the AR parametric
+            signal model estimate of X using Burg's method. The model has order
+            ORDER, and the output array A has ORDER+1 columns.
+            The coefficients along the Nth row of A model the Nth column of X.
+            If X is a vector then A is a row vector.
 
-        [A,E] = ARBURG(...) returns the final prediction error E (the variance
-        estimate of the white noise input to the AR model).
+            [A,E] = ARBURG(...) returns the final prediction error E (the variance
+            estimate of the white noise input to the AR model).
 
-        [A,E,K] = ARBURG(...) returns the reflection coefficients (parcor
-        coefficients) in each column of K.
+            [A,E,K] = ARBURG(...) returns the reflection coefficients (parcor
+            coefficients) in each column of K.
             Input Args:
-                x: is Nx1
+                x: a time series comes from AR process, Nx1
             Return:
                 err: final prediction error (estimated white noise variance)
                 k: has size 1xm and m can range from 1 to AR order, error is mXps
@@ -953,9 +977,6 @@ class ARXmodelfit(object):
             a_conj = a_flip.conjugate(a_flip)
             a = np.concatenate((a, [[0]]), 1) + kk * np.concatenate(
                 ([[0]], a_conj), 1)
-            # coef = float(-1) * a[0][1:]
-            # coef = float(-1) * np.flip([coef], 1)
-            # coef = np.concatenate(([1],coef[0]))
             # Update the prediction error
             err = (1 - kk * kk) * err
 
@@ -963,9 +984,9 @@ class ARXmodelfit(object):
 
     def arburg_(self, x):
         """
-        This function Vectorized AR parameter estimation via Burg method
+            This function Vectorized AR parameter estimation via Burg method
             Input Args:
-                x: is Nx1
+                x: a time series comes from AR process, Nx1
             Return:
                 err: final prediction error (estimated white noise variance)
                 b{m}: has size 1xm and m can range from 1 to AR order, error is mXps
@@ -1010,15 +1031,18 @@ class ARXmodelfit(object):
 
     def calculateROC(self, scores, labels):
         """
-        Computes the area under the ROC curve (AUC) of a binary classifier.
+        C   omputes the area under the ROC curve (AUC) of a binary classifier.
             Input Args:
                 scores: classifier scores
                 labels: true labels
             Return:
                 auc: the area under the ROC curve
-                acc: accuracy, number of correct assessments divided by number of all samples
-                sensitivity: number of true positive assessments divided by number of all positive samples
-                specificity: number of true negative assessments divided by number of all negative samples
+                acc: accuracy, number of correct assessments divided by number
+                     of all samples
+                sensitivity: number of true positive assessments divided by
+                             number of all positive samples
+                specificity: number of true negative assessments divided by
+                             number of all negative samples
         """
         fpr, tpr, _ = metrics.roc_curve(labels, scores, pos_label=1)
         fnr, tnr, _ = metrics.roc_curve(labels, scores, pos_label=0)
@@ -1031,7 +1055,7 @@ class ARXmodelfit(object):
 
     def calculateACC(self, scores, labels):
         """
-        Computes the accuracy of the classification.
+            Computes the accuracy of the classification.
             Input Args:
                 scores: classifier scores
                 labels: true labels
@@ -1046,10 +1070,7 @@ class ARXmodelfit(object):
             sc = scores[:,s]
             indx = [i for i in range(self.numTrial+1) if sc[i] == min(sc)]
             sc = np.zeros(self.numTrial+1)
-            try:
-                sc[indx[0]] = 1
-            except:
-                tt = 1
+            sc[indx[0]] = 1
             err_sum += np.sum(np.abs(sc - labels[:,s]))
 
         acc = 1 - err_sum/(numSamp*(self.numTrial+1))
