@@ -33,12 +33,13 @@ class ARXmodelfit(object):
             delays --->  delays of gamma functions, vector, double
             numSeq ---> total number of sequences, int
             tau --->  Kurtosis of gamma functions, vector, int
-            fs ---> sampling frequency, scaler real value, double
+            fs ---> sampling frequency (Hz), scaler real value, double
 
         Methods:
             data_for_corssValidation
             cyclic_decent_method
             multiChanenelCoeff
+            syntheticEEGseq
             gammafunction
             loglikelihood
             calculateROC
@@ -88,9 +89,6 @@ class ARXmodelfit(object):
                 ACC: accuracy of the classifier at each fold (nFold x 1)
                 parameters: best parameters for each channel/brain sources
         """
-        eeg = data["timeseries"]
-        trigOnsets = data["stimOnset"]
-        targetOnsets = data["targetOnset"]
         # Initialization
         auc_ch = np.zeros((nFold, len(self.channels)))
         AUC = np.zeros((nFold, 1))
@@ -210,7 +208,7 @@ class ARXmodelfit(object):
             for ch in range(2):#range(len(self.channels)):
                 scores[:,ch] = score[ch]
 
-            _, _,data_test["coeff"],_ = self.multiChanenelCoeff(scores, trialTargetness)
+            _, _,data_test["coeff"], _ = self.multiChanenelCoeff(scores, trialTargetness)
             if self.paradigm == "FRP":
                 AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:2*nParam[-1],:],
                                          data_test, range(2)) #range(len(self.channels)))
@@ -682,6 +680,95 @@ class ARXmodelfit(object):
 
         return parameter, loglikelihood, sigma_hat, y_hat, signal_hat, s_hat
 
+
+    def syntheticEEGseq(self, parameter, trigOnsets, targetOnset):
+        """
+            Generates synthetic EEG signals according to the parameters
+            learning in the 'modelfitting' mode
+            Input Args:
+                parameter: a vector of the ARX model parameters
+                trigOnsets: trigger information for all trials, 2D matrix,
+                           numberTrial x numberSequence
+                targetOnset: trigger information for target events, vector,
+                             1 x numberSequence
+            Return:
+                syn_data: synthetic data, a dictionary
+        """
+        N = self.numSamp - self.ARorder
+        Ix = np.identity(N)
+        numSeq = targetOnset.shape[1]
+        s_hat = np.zeros((self.numSamp, numSeq))
+        eeg_hat = np.zeros((len(self.channels), self.numSamp, numSeq))
+        nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
+                          self.ARorder + sum(self.compOrder) + 1]
+
+        for s in range(numSeq):
+            z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
+            # VEP components
+            vep = np.zeros((self.compOrder[0], N))
+            for trial in range(trigOnsets.shape[0]):
+                input = trigOnsets[trial,s] + self.delays[0]
+                vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
+
+            z[0:self.compOrder[0], :] = vep
+
+            if self.paradigm == "FRP":
+                input_p = trigOnsets[0,s] + self.delays[1]
+                input_q = trigOnsets[0,s] + self.delays[2]
+                z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
+                    self.gammafunction(input_p, self.compOrder[1], self.tau[1])
+                z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
+                    self.gammafunction(input_q, self.compOrder[2], self.tau[2])
+                # generate signal for each channel
+                for ch in range(len(self.channels)):
+                    # separate parameters for -FRP and +FRP
+                    len_param = parameter.shape[0]/2
+                    if targetOnset[0,s] > 0:
+                        param = parameter[len_param:,:]
+                    else:
+                        param = parameter[:len_param,:]
+                    alpha = param[:nParam[0], ch]
+                    beta = param[nParam[0]:nParam[1], ch]
+                    sigma_hat = param[-1, ch]
+            else:
+                if targetOnset[0,s] > 0:
+                    input_p = targetOnset[0,s] + self.delays[1]
+                    input_q = targetOnset[0,s] + self.delays[2]
+                    tmp1 = self.gammafunction(input_p, self.compOrder[1],
+                                              self.tau[1])
+                    tmp2 = self.gammafunction(input_q, self.compOrder[2],
+                                              self.tau[2])
+                else:
+                    tmp1 = np.zeros((self.compOrder[1], N))
+                    tmp2 = np.zeros((self.compOrder[2], N))
+
+                z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
+                z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
+                alpha = parameter[:nParam[0], ch]
+                beta = parameter[nParam[0]:nParam[1], ch]
+                sigma_hat = parameter[-1, ch]
+            # estimated VEP & ERP/FRP terms
+            sig_hat = np.concatenate(np.zeros((self.ARorder,1)),np.matmul(z.T, beta))
+            # Estimated EEG sequences based on the estimated parameters
+            s_tilde = np.zeros((self.ARorder,1))
+            noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
+            s_hat[:self.ARorder, s] = noise[0, :self.ARorder]
+            for n in range(self.ARorder + 1, self.numSamp):
+                s_hat[n, s] = np.sum(np.flip(s_tilde, 0) * alpha.T) + noise[
+                    0, n]
+                s_tilde = np.concatenate(
+                    (s_tilde[1:], np.expand_dims(s_hat[n, s], 0)))
+
+            signal_hat = np.reshape(sig_hat, (self.numSamp, 1))
+            eeg_hat[ch,:,s] = signal_hat + s_hat
+
+        syn_data = dict()
+        syn_data.update({"timeseries":eeg_hat,
+                         "stimOnset":trigOnsets,
+                         "targetOnset":targetOnset})
+        return syn_data
+
+
     def gammafunction(self, x, compOrder, tau):
         """
             Generates the brain impulse responses to the visual and this
@@ -692,7 +779,7 @@ class ARXmodelfit(object):
             for more information, please check equation (4) in "A Parametric
             EEG Signal Model for BCIs with Rapid-Trial Sequences" paper.
             Input Args:
-                x: is Nx1
+                x: a time series comes from AR process, Nx1
                 compOrder: order of the polynomial exponential function
                 tau: indicates skewness of the exponential function
             Return:
@@ -703,7 +790,7 @@ class ARXmodelfit(object):
             dn = np.min(np.diff(x))
         except:
             dn = 0
-        # x = np.array(x)
+
         try:
             N = x.shape[0]
             Onset0 = x[0]
@@ -796,7 +883,6 @@ class ARXmodelfit(object):
         N = self.numSamp - self.ARorder
         Ix = np.identity(N)
         z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
-        ar_hat = np.zeros((self.numSamp, 1))
         log_score = np.zeros((y.shape[0]))
         nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
