@@ -88,6 +88,7 @@ class ARXmodelfit(object):
                 AUC: AUC of the classifier at each fold (nFold x 1)
                 ACC: accuracy of the classifier at each fold (nFold x 1)
                 parameters: best parameters for each channel/brain sources
+                hyperParam: hyperparameters of the ARX model for all channel
         """
         # Initialization
         auc_ch = np.zeros((nFold, len(self.channels)))
@@ -236,7 +237,9 @@ class ARXmodelfit(object):
             else:
                 parameters[ch, :] = parameter_hat[best_ind[0], 0:nParam[-1], ch]
 
-        return AUC, ACC, parameters
+        hyperParam = [self.ARorder]+self.tau+self.delays+list(self.compOrder)
+
+        return AUC, ACC, parameters, hyperParam
 
     def data_for_corssValidation(self, data, nFold=10):
         """
@@ -669,9 +672,8 @@ class ARXmodelfit(object):
             s_tilde = eeg[:self.ARorder, s]
             noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
             s_hat[:self.ARorder, s] = noise[0, :self.ARorder]
-            for n in range(self.ARorder + 1, self.numSamp):
-                s_hat[n, s] = np.sum(np.flip(s_tilde, 0) * alpha_hat.T) + noise[
-                    0, n]
+            for n in range(self.ARorder, self.numSamp):
+                s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T,alpha_hat) + noise[0,n]
                 s_tilde = np.concatenate(
                     (s_tilde[1:], np.expand_dims(s_hat[n, s], 0)))
 
@@ -701,66 +703,62 @@ class ARXmodelfit(object):
         eeg_hat = np.zeros((len(self.channels), self.numSamp, numSeq))
         nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
-
+        # generate multi-channel EEG signals for M sequences
         for s in range(numSeq):
-            z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
-            # VEP components
-            vep = np.zeros((self.compOrder[0], N))
-            for trial in range(trigOnsets.shape[0]):
-                input = trigOnsets[trial,s] + self.delays[0]
-                vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
-
-            z[0:self.compOrder[0], :] = vep
-
-            if self.paradigm == "FRP":
-                input_p = trigOnsets[0,s] + self.delays[1]
-                input_q = trigOnsets[0,s] + self.delays[2]
-                z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
-                    self.gammafunction(input_p, self.compOrder[1], self.tau[1])
-                z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
-                    self.gammafunction(input_q, self.compOrder[2], self.tau[2])
-                # generate signal for each channel
-                for ch in range(len(self.channels)):
+            # generate signal for each channel
+            for ch in range(len(self.channels)):
+                z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
+                # VEP components
+                vep = np.zeros((self.compOrder[0], N))
+                for trial in range(trigOnsets.shape[0]):
+                    input = trigOnsets[trial,s] + self.delays[0]
+                    vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
+                z[0:self.compOrder[0], :] = vep
+                if self.paradigm == "FRP":
+                    input_p = trigOnsets[0,s] + self.delays[1]
+                    input_q = trigOnsets[0,s] + self.delays[2]
+                    z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
+                        self.gammafunction(input_p, self.compOrder[1], self.tau[1])
+                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
+                        self.gammafunction(input_q, self.compOrder[2], self.tau[2])
                     # separate parameters for -FRP and +FRP
-                    len_param = parameter.shape[0]/2
+                    len_param = parameter.shape[1]/2
                     if targetOnset[0,s] > 0:
-                        param = parameter[len_param:,:]
+                        param = parameter[ch,len_param:]
                     else:
-                        param = parameter[:len_param,:]
-                    alpha = param[:nParam[0], ch]
-                    beta = param[nParam[0]:nParam[1], ch]
-                    sigma_hat = param[-1, ch]
-            else:
-                if targetOnset[0,s] > 0:
-                    input_p = targetOnset[0,s] + self.delays[1]
-                    input_q = targetOnset[0,s] + self.delays[2]
-                    tmp1 = self.gammafunction(input_p, self.compOrder[1],
-                                              self.tau[1])
-                    tmp2 = self.gammafunction(input_q, self.compOrder[2],
-                                              self.tau[2])
+                        param = parameter[ch,:len_param]
+                    alpha = param[:nParam[0]]
+                    beta = param[nParam[0]:nParam[1]]
+                    sigma_hat = param[-1]
                 else:
-                    tmp1 = np.zeros((self.compOrder[1], N))
-                    tmp2 = np.zeros((self.compOrder[2], N))
+                    if targetOnset[0,s] > 0:
+                        input_p = targetOnset[0,s] + self.delays[1]
+                        input_q = targetOnset[0,s] + self.delays[2]
+                        tmp1 = self.gammafunction(input_p, self.compOrder[1],
+                                                  self.tau[1])
+                        tmp2 = self.gammafunction(input_q, self.compOrder[2],
+                                                  self.tau[2])
+                    else:
+                        tmp1 = np.zeros((self.compOrder[1], N))
+                        tmp2 = np.zeros((self.compOrder[2], N))
 
-                z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
-                z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
-                alpha = parameter[:nParam[0], ch]
-                beta = parameter[nParam[0]:nParam[1], ch]
-                sigma_hat = parameter[-1, ch]
-            # estimated VEP & ERP/FRP terms
-            sig_hat = np.concatenate(np.zeros((self.ARorder,1)),np.matmul(z.T, beta))
-            # Estimated EEG sequences based on the estimated parameters
-            s_tilde = np.zeros((self.ARorder,1))
-            noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
-            s_hat[:self.ARorder, s] = noise[0, :self.ARorder]
-            for n in range(self.ARorder + 1, self.numSamp):
-                s_hat[n, s] = np.sum(np.flip(s_tilde, 0) * alpha.T) + noise[
-                    0, n]
-                s_tilde = np.concatenate(
-                    (s_tilde[1:], np.expand_dims(s_hat[n, s], 0)))
+                    z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
+                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
+                    alpha = parameter[ch,:nParam[0]]
+                    beta = parameter[ch, nParam[0]:nParam[1]]
+                    sigma_hat = parameter[ch, -1]
+                # estimated VEP & ERP/FRP terms
+                sig_hat = np.concatenate((np.zeros((self.ARorder)), np.matmul(z.T, beta)))
+                # Estimated EEG sequences based on the estimated parameters
+                s_tilde = np.zeros((self.ARorder,1))
+                noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
+                s_hat[:self.ARorder, s] = noise[:self.ARorder]
+                for n in range(self.ARorder, self.numSamp):
+                    s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T,alpha) + noise[n]
+                    s_tilde[:,0] = np.concatenate([s_tilde[1:,0], np.expand_dims(s_hat[n, s], 0)])
 
-            signal_hat = np.reshape(sig_hat, (self.numSamp, 1))
-            eeg_hat[ch,:,s] = signal_hat + s_hat
+                signal_hat = np.reshape(sig_hat, (self.numSamp, 1))
+                eeg_hat[ch,:,s] = signal_hat[:,0] + s_hat[:,s]
 
         syn_data = dict()
         syn_data.update({"timeseries":eeg_hat,

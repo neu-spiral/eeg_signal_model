@@ -9,14 +9,13 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "FRP"
-multiChannel = True
+paradigm = "ERP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
-mode = "modelfitting"
+mode = "simulator"
 hyperParameterLearning = True
 # set directories including data and to save files
-file_dir = "./data/"+paradigm+"s/"+mode  # data directory (data should be in MATLAB)
+file_dir = "./data/"+paradigm+"s"  # data directory (data should be in MATLAB)
 fig_dir = "./figures/"+paradigm+"s/"    # path to save figures
 model_dir = "./model/"+paradigm+"s/"    # path to save figures
 list_filename = os.listdir(file_dir) # list of files' name in the data directory
@@ -30,7 +29,6 @@ data['stimOnset'] = tmp['us']
 data['targetOnset'] = tmp['ue']
 data['timeseries'] = tmp['eeg_seq']
 channels = tmp['EEGChannels'][0]
-hyperparameter = tmp['hyperparameters']   # range of hyperparameters for grid search
 auc_user = tmp['auc'][0][0]
 fs = tmp['fs'][0][0]
 numTrial = tmp['numTrial'][0][0]
@@ -46,20 +44,26 @@ if paradigm != "FRP" and paradigm != "ERP":
     print CRED + "Please enter a valid paradigm e.g. FRP or ERP!" + CEND
     sys.exit()
 # Print the user id and AUC value saved in the file
-print '\n', 'User:', userID, '\n', 'TB_AUC:', auc_user, '\n', '\n', '\n'
-
+print '\n', 'User:', userID, '\n', 'TB_AUC:', auc_user, '\n', '\n'
+print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
     with open(model_dir+userID+'_modelParam.p', "rb") as f:
-        tmp_dic = pickle.load(f)
+        model_dic = pickle.load(f)
     f.close()
-    parameters = tmp_dic["parameters"]
+    try:
+        parameters = model_dic["parameters"]
+        hyperparameter = model_dic["hyperparameters"]
+    except:
+        print CRED + 'You need to learn the ARX model parameters and hyperparameters!' + CEND
+        print CRED + 'First, run on \'modelfitting\' mode.' + CEND
+        sys.exit()
     stimOnset = tmp['us']
     targetOnset = tmp['ue']
     modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
                             numSeq=numSeq, numSamp=numSam, channels=channels,
                             hyperparameter=hyperparameter, orderSelection=False)
-    syn_data = modelObj.syntheticEEG(parameters, stimOnset, targetOnset)
+    syn_data = modelObj.syntheticEEGseq(parameters, stimOnset, targetOnset)
     meanBrainRespVisualiz(syn_data, fs, paradigm, mode, fig_dir, userID)
     if saveFlag:
         with open(model_dir+userID+'_syntheticData.p', "wb") as f:
@@ -69,14 +73,17 @@ if mode == "simulator":
 elif mode == "modelfitting":
     # timeseries of multi-channel EEG measurement (numChannel x numSample x numSequence)
     meanBrainRespVisualiz(data, fs, paradigm, mode, fig_dir, userID)
+    # set a range of hyperparameters for grid search
+    hyperparameter = tmp['hyperparameters']
     modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
                             numSeq=numSeq, numSamp=numSam, channels=channels,
                             hyperparameter=hyperparameter, orderSelection=True)
-    auc, acc, parameters = modelObj.ARXmodelfit(data=data, nFold=nFold)
+    auc, acc, parameters, hyperParam = modelObj.ARXmodelfit(data=data, nFold=nFold)
     print 'AUC:',np.mean(auc),u'\u00B1',np.std(auc)
     print 'ACC:', np.mean(acc),u'\u00B1',np.std(acc)
     if saveFlag:
         save_dic = {"parameters": parameters,
+                    "hyperparameters": hyperParam,
                     "accuracy": auc,
                     "auc": acc}
         with open(model_dir+userID+'_modelParam.p', "wb") as f:
@@ -84,7 +91,7 @@ elif mode == "modelfitting":
         f.close()
 
 elif mode == "visualization":
-    meanBrainRespVisualiz(data, fs, paradigm, mode, fig_dir, userID)
+    meanBrainRespVisualiz(data, fs, paradigm, mode)
 
 else:
     print CRED + mode, 'is NOT defined!' + CEND
