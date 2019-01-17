@@ -131,7 +131,7 @@ class ARXmodelfit(object):
             # Parameters estimation for each channel/brain sources
             numSeq_train = data_train["numSeq"]
             numSeq_test = data_test["numSeq"]
-            for ch in range(2):#range(len(self.channels)):
+            for ch in range(len(self.channels)):
                 if self.orderSelection:
                     bic = []
                     for k in AR_range:
@@ -204,20 +204,18 @@ class ARXmodelfit(object):
                     self.model_eval(param, data_test, [ch])
                 score.append(score_)
 
-            scores = np.zeros((score[0].shape[0],2)) # len(self.channels)))
+            scores = np.zeros((score[0].shape[0],len(self.channels)))
 
-            for ch in range(2):#range(len(self.channels)):
+            for ch in range(len(self.channels)):
                 scores[:,ch] = score[ch]
 
             _, _,data_test["coeff"], _ = self.multiChanenelCoeff(scores, trialTargetness)
             if self.paradigm == "FRP":
                 AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:2*nParam[-1],:],
-                                         data_test, range(2)) #range(len(self.channels)))
+                                         data_test, range(len(self.channels)))
             else:
                 AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
-                                         data_test, range(2)) #range(len(self.channels)))
-
-            #print("AUC:  | ACC: ".format(auc[f], acc[f]))
+                                         data_test, range(len(self.channels)))
             # Set current status
             prog.set_stat(f + 1)
             # Update Progress Bar again

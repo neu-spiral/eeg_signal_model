@@ -9,10 +9,10 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "ERP"
+paradigm = "FRP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
-mode = "simulator"
+mode = "modelfitting"
 hyperParameterLearning = True
 # set directories including data and to save files
 try:
@@ -29,14 +29,13 @@ try:
 except:
     print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
 eegCh = range(16)     # number of eeg channels
-nFold = 2          # number of fold in cross validation
+nFold = 5          # number of fold in cross validation
 # load filename and initialize the user from MATLAB file
 data = dict()
 data['stimOnset'] = tmp['us']
 data['targetOnset'] = tmp['ue']
 data['timeseries'] = tmp['eeg_seq']
 channels = tmp['EEGChannels'][0]
-auc_user = tmp['auc'][0][0]
 fs = tmp['fs'][0][0]
 numTrial = tmp['numTrial'][0][0]
 numSeq = tmp['numSeq'][0][0]
@@ -51,7 +50,7 @@ if paradigm != "FRP" and paradigm != "ERP":
     print CRED + "Please enter a valid paradigm e.g. FRP or ERP!" + CEND
     sys.exit()
 # Print the user id and AUC value saved in the file
-print '\n', 'User:', userID, '\n', 'TB_AUC:', auc_user, '\n', '\n'
+print '\n', 'User:', userID, '\n','\n'
 print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
