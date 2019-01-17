@@ -15,15 +15,22 @@ saveFlag = True
 mode = "simulator"
 hyperParameterLearning = True
 # set directories including data and to save files
-file_dir = "./data/"+paradigm+"s"  # data directory (data should be in MATLAB)
-fig_dir = "./figures/"+paradigm+"s/"    # path to save figures
-model_dir = "./model/"+paradigm+"s/"    # path to save figures
-list_filename = os.listdir(file_dir) # list of files' name in the data directory
+try:
+    file_dir = "./data/"+paradigm+"s"       # data directory (data should be in MATLAB)
+    fig_dir = "./figures/"+paradigm+"s/"    # path to save figures
+    model_dir = "./model/"+paradigm+"s/"    # path to save model parameters and synthetic data
+except:
+    print CRED + 'Make sure you have all of the required folders and subfolders!' + CEND
+try:
+    # list of files' name in the data directory
+    list_filename = os.listdir(file_dir)
+    filename = list_filename[0]
+    tmp = sio.loadmat(file_dir + '/' + filename)
+except:
+    print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
 eegCh = range(16)     # number of eeg channels
 nFold = 2          # number of fold in cross validation
 # load filename and initialize the user from MATLAB file
-filename = list_filename[0]
-tmp = sio.loadmat(file_dir + '/' + filename)
 data = dict()
 data['stimOnset'] = tmp['us']
 data['targetOnset'] = tmp['ue']
