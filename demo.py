@@ -9,10 +9,11 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "FRP"
+paradigm = "ERP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
-mode = "modelfitting"
+mode = "simulator"
+fileNum = 0
 hyperParameterLearning = True
 # set directories including data and to save files
 try:
@@ -24,7 +25,7 @@ except:
 try:
     # list of files' name in the data directory
     list_filename = os.listdir(file_dir)
-    filename = list_filename[0]
+    filename = list_filename[fileNum]
     tmp = sio.loadmat(file_dir + '/' + filename)
 except:
     print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
@@ -40,7 +41,6 @@ fs = tmp['fs'][0][0]
 numTrial = tmp['numTrial'][0][0]
 numSeq = tmp['numSeq'][0][0]
 numSam = tmp['eeg_seq'].shape[1]
-
 # print the user is and performance according to the trial-based (TB) model
 indx = [i for i in range(len(filename)) if filename[i] == '_']
 userID = filename[:indx[2]]
@@ -52,6 +52,7 @@ if paradigm != "FRP" and paradigm != "ERP":
 # Print the user id and AUC value saved in the file
 print '\n', 'User:', userID, '\n','\n'
 print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
+
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
     with open(model_dir+userID+'_modelParam.p', "rb") as f:

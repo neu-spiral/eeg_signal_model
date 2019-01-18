@@ -391,7 +391,6 @@ class ARXmodelfit(object):
         # Initialization
         label = np.zeros((numSeq,1))
         coeff = data["coeff"]
-        sc = np.zeros((self.numTrial+1, numSeq))
         score = np.zeros((len(channel), numSeq*(self.numTrial+1)))
         if self.paradigm == "FRP":
             loglikelihood = np.zeros((numSeq, 2, len(channel)))
@@ -403,6 +402,7 @@ class ARXmodelfit(object):
         # Computing loglikehood scores for each possible target location
         for seq in range(numSeq):
             if self.paradigm == "FRP":
+                sc = np.zeros((len(channel), numSeq))
                 # negative sequences
                 if ue[0,seq] > 0:
                     label[seq,0] = 1
@@ -422,6 +422,7 @@ class ARXmodelfit(object):
                 loglikelihood[seq,1,:] = self.loglikelihoodARX(y[channel,:,seq],
                                          us[:,seq], [], parameter[len_param:,:])
             else:
+                sc = np.zeros((self.numTrial+1, numSeq))
                 targetLoc = ue[0,seq]
                 possibleTarget = np.concatenate(([0], us[:,seq]))
                 for trial in range(self.numTrial+1):
@@ -446,7 +447,6 @@ class ARXmodelfit(object):
                 scores = np.expand_dims(scores, 0)[0,:]
 
             auc, acc, _, _ = self.calculateROC(scores, label[:,0])
-            #acc = self.calculateACC(scores, label[:,0])
             trialTargetness = label[:,0]
 
         else:
