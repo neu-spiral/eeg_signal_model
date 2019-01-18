@@ -9,7 +9,7 @@ The performance of the signal model is assessed in the context of RSVP Keyboard,
 
 - modelfitting: to fix an ARX model to EEG sequences [2];
 - simulator: to generate synthetic data according to the ARX model learned in the 'modelfitting' mode;
-- visualization: to visualize the average brain responses over EEG trials .
+- visualization: to visualize the average brain responses over EEG trials.
 
 There are two predefined experimental paradigms including Event-Related Potentials (ERPs) and Feedback-related Potentials (FRPs). More details about the signal model and experimental paradigms can be found in [3].
 
