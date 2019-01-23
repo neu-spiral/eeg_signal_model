@@ -98,6 +98,7 @@ class ARXmodelfit(object):
         parameter_hat = np.zeros((nFold, 300, len(self.channels)))
         trialTargetness = []
         score = []
+        count = 0
 
         # Time resolution for delays in grid search for model order selection
         if self.orderSelection:
@@ -118,7 +119,7 @@ class ARXmodelfit(object):
             self.data_for_corssValidation(data, nFold)
 
         # Create Object
-        prog = pyprog.ProgressBar(" ", "", 34)
+        prog = pyprog.ProgressBar(" ", "", total=nFold*len(self.channels))
         # Update Progress Bar
         prog.update()
         for f in range(nFold):
@@ -216,10 +217,11 @@ class ARXmodelfit(object):
             else:
                 AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
                                          data_test, range(len(self.channels)))
-            # Set current status
-            prog.set_stat(f + 1)
-            # Update Progress Bar again
-            prog.update()
+                count += 1
+                # Set current status
+                prog.set_stat(count)
+                # Update Progress Bar again
+                prog.update()
 
         # Make the Progress Bar final
         prog.end()
@@ -702,6 +704,10 @@ class ARXmodelfit(object):
         nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
                           self.ARorder + sum(self.compOrder) + 1]
         # generate multi-channel EEG signals for M sequences
+        # Create Object
+        prog = pyprog.ProgressBar(" ", "", total=numSeq)
+        # Update Progress Bar
+        prog.update()
         for s in range(numSeq):
             # generate signal for each channel
             for ch in range(len(self.channels)):
@@ -757,7 +763,13 @@ class ARXmodelfit(object):
 
                 signal_hat = np.reshape(sig_hat, (self.numSamp, 1))
                 eeg_hat[ch,:,s] = signal_hat[:,0] + s_hat[:,s]
+            # Set current status
+            prog.set_stat((s+1.))
+            # Update Progress Bar again
+            prog.update()
 
+        # Make the Progress Bar final
+        prog.end()
         syn_data = dict()
         syn_data.update({"timeseries":eeg_hat,
                          "stimOnset":trigOnsets,
