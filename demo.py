@@ -9,11 +9,11 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "ERP"
+paradigm = "FRP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
 mode = "simulator"
-fileNum = 0
+fileNum = 1
 hyperParameterLearning = True
 # set directories including data and to save files
 try:
@@ -22,6 +22,13 @@ try:
     model_dir = "./model/"+paradigm+"s/"    # path to save model parameters and synthetic data
 except:
     print CRED + 'Make sure you have all of the required folders and subfolders!' + CEND
+    sys.exit()
+
+allDir = [file_dir, fig_dir, model_dir]
+for dir in allDir:
+    if not os.path.isdir(dir):
+        print CRED + 'There is not directory as',dir + CEND
+        sys.exit()
 try:
     # list of files' name in the data directory
     list_filename = os.listdir(file_dir)
@@ -29,6 +36,8 @@ try:
     tmp = sio.loadmat(file_dir + '/' + filename)
 except:
     print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
+    sys.exit()
+
 eegCh = range(16)     # number of eeg channels
 nFold = 5          # number of fold in cross validation
 # load filename and initialize the user from MATLAB file
@@ -55,10 +64,11 @@ print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
-    with open(model_dir+userID+'_modelParam.p', "rb") as f:
-        model_dic = pickle.load(f)
-    f.close()
+
     try:
+        with open(model_dir+userID+'_modelParam.p', "rb") as f:
+            model_dic = pickle.load(f)
+        f.close()
         parameters = model_dic["parameters"]
         hyperparameter = model_dic["hyperparameters"]
     except:
