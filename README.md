@@ -1,5 +1,6 @@
 # eeg_signal_model
 This repository belongs to the generative EEG signal modeling project in Cognitive Systems Laboratory (CSL), at Northeastern University.
+You need to use Python 2.7 version.
 
 Electroencephalography (EEG) is an effective noninvasive measurement method to infer user intent in brain-computer interface (BCI) systems for control and communication, but so far these lack sufficient accuracy and speed due to low separability of class-conditional EEG feature distributions. Many factors impact system performance, including inadequate training datasets and models’ ignorance of the temporal dependency of brain responses to serial stimuli. 
 
