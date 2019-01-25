@@ -1,7 +1,8 @@
-import os, sys, pickle
+import os, sys #, pickle
 import scipy.io as sio
 import numpy as np
 from signal_model.ARXmodelFit import ARXmodelfit
+import signal_model.pickle as pickle
 from signal_model.meanBrainRespVisualiz import meanBrainRespVisualiz
 
 CRED = '\033[31m'
@@ -9,7 +10,7 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "FRP"
+paradigm = "ERP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
 mode = "simulator"
@@ -62,19 +63,28 @@ if paradigm != "FRP" and paradigm != "ERP":
 print '\n', 'User:', userID, '\n','\n'
 print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 
+#
+# filename = list_filename[2]
+# mat = sio.loadmat(file_dir + '/' + filename)
+# save_dic = {"parameters": mat["parameters"],
+#             "hyperparameters": tmp["hyperparameters"][0]}
+# with open(model_dir+userID+'_modelParam.p', "wb") as f:
+#     pickle.dump(save_dic, f)
+# f.close()
+#
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
-
     try:
         with open(model_dir+userID+'_modelParam.p', "rb") as f:
             model_dic = pickle.load(f)
         f.close()
-        parameters = model_dic["parameters"]
-        hyperparameter = model_dic["hyperparameters"]
     except:
-        print CRED + 'You need to learn the ARX model parameters and hyperparameters!' + CEND
-        print CRED + 'First, run on \'modelfitting\' mode.' + CEND
+        print CRED + 'Cannot load the modelParam file!' + CEND
+        print CRED + 'There is either a problem with loading file or the directory.' + CEND
+        print CRED + 'Make sure there exits the ARX model parameters and hyperparameters!' + CEND
         sys.exit()
+    parameters = model_dic["parameters"]
+    hyperparameter = model_dic["hyperparameters"]
     stimOnset = tmp['us']
     targetOnset = tmp['ue']
     modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
