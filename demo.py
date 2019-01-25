@@ -9,7 +9,7 @@ CEND = '\033[0m'
 
 # Set the simulator parameters
 # Experiment paradigm including 'ERP' and 'FRP'
-paradigm = "ERP"
+paradigm = "FRP"
 saveFlag = True
 # Define the program mode: 'simulator', 'modelfitting', 'visualization'
 mode = "simulator"
