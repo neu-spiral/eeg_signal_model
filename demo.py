@@ -1,8 +1,8 @@
 import os, sys, pickle
 import scipy.io as sio
 import numpy as np
-from signal_model.ARXmodelFit import ARXmodelfit
-from signal_model.meanBrainRespVisualiz import meanBrainRespVisualiz
+from signal_model.ARXmodelFit import ARXModel
+from signal_model.meanBrainRespVisualiz import mean_resp_visualization
 
 CRED = '\033[31m'
 CEND = '\033[0m'
@@ -17,11 +17,15 @@ fileNum = 1
 hyperParameterLearning = True
 # set directories including data and to save files
 try:
-    file_dir = "./data/" + paradigm + "s"  # data directory (data should be in MATLAB)
-    fig_dir = "./figures/" + paradigm + "s/"  # path to save figures
-    model_dir = "./model/" + paradigm + "s/"  # path to save model parameters and synthetic data
+    # data directory (data should be in MATLAB)
+    file_dir = "./data/" + paradigm + "s"
+    # path to save figures
+    fig_dir = "./figures/" + paradigm + "s/"
+    # path to save model parameters and synthetic data
+    model_dir = "./model/" + paradigm + "s/"
 except:
-    print CRED + 'Make sure you have all of the required folders and subfolders!' + CEND
+    print CRED + 'Make sure you have all of the required folders ' \
+                 'and subfolders!' + CEND
     sys.exit()
 
 allDir = [file_dir, fig_dir, model_dir]
@@ -35,7 +39,8 @@ try:
     filename = list_filename[fileNum]
     tmp = sio.loadmat(file_dir + '/' + filename)
 except:
-    print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
+    print CRED + 'Make sure data folder includes .mat data for ' \
+                 'the selected paradigm!' + CEND
     sys.exit()
 
 eegCh = range(16)  # number of eeg channels
@@ -79,31 +84,34 @@ if mode == "simulator":
         f.close()
     except:
         print CRED + 'Cannot load the modelParam file!' + CEND
-        print CRED + 'There is either a problem with loading file or the directory.' + CEND
-        print CRED + 'Make sure there exits the ARX model parameters and hyperparameters!' + CEND
+        print CRED + 'There is either a problem with loading file ' \
+                     'or the directory.' + CEND
+        print CRED + 'Make sure there exits the ARX model parameters ' \
+                     'and hyperparameters!' + CEND
         sys.exit()
     parameters = model_dic["parameters"]
     hyperparameter = model_dic["hyperparameters"]
     stimOnset = tmp['us']
     targetOnset = tmp['ue']
-    modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                           numSeq=numSeq, numSamp=numSam, channels=channels,
-                           hyperparameter=hyperparameter, orderSelection=False)
+    modelObj = ARXModel(fs=fs, paradigm=paradigm, numTrial=numTrial,
+                        numSeq=numSeq, numSamp=numSam, channels=channels,
+                        hyperparameter=hyperparameter, orderSelection=False)
     syn_data = modelObj.syntheticEEGseq(parameters, stimOnset, targetOnset)
-    meanBrainRespVisualiz(syn_data, fs, paradigm, mode, fig_dir, userID)
+    mean_resp_visualization(syn_data, fs, paradigm, mode, fig_dir, userID)
     if saveFlag:
         with open(model_dir + userID + '_syntheticData.p', "wb") as f:
             pickle.dump(syn_data, f)
         f.close()
 
 elif mode == "modelfitting":
-    # timeseries of multi-channel EEG measurement (numChannel x numSample x numSequence)
-    meanBrainRespVisualiz(data, fs, paradigm, mode, fig_dir, userID)
+    # timeseries of multi-channel EEG measurement
+    # (numChannel x numSample x numSequence)
+    mean_resp_visualization(data, fs, paradigm, mode, fig_dir, userID)
     # set a range of hyperparameters for grid search
     hyperparameter = tmp['hyperparameters']
-    modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                           numSeq=numSeq, numSamp=numSam, channels=channels,
-                           hyperparameter=hyperparameter, orderSelection=True)
+    modelObj = ARXModel(fs=fs, paradigm=paradigm, numTrial=numTrial,
+                        numSeq=numSeq, numSamp=numSam, channels=channels,
+                        hyperparameter=hyperparameter, orderSelection=True)
     auc, acc, parameters, hyperParam = modelObj.ARXmodelfit(data=data,
                                                             nFold=nFold)
     print 'AUC:', np.mean(auc), u'\u00B1', np.std(auc)
@@ -118,7 +126,7 @@ elif mode == "modelfitting":
         f.close()
 
 elif mode == "visualization":
-    meanBrainRespVisualiz(data, fs, paradigm, mode)
+    mean_resp_visualization(data, fs, paradigm, mode)
 
 else:
     print CRED + mode, 'is NOT defined!' + CEND

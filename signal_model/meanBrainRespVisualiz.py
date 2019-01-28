@@ -4,108 +4,109 @@ import matplotlib.pyplot as plt
 CRED = '\033[31m'
 CEND = '\033[0m'
 
-def meanBrainRespVisualiz(data, fs, paradigm, mode, savingPath=[], userID=[]):
+
+def mean_resp_visualization(data, fs, paradigm, mode, path_save=[], id_user=[]):
     """
         Plot the average brain responses under two experiment paradigm in
         RSVPKeyboard tasks including ERP and FRP
         Input Args:
              data: a dictionary including
-                   timeseries - eeg signals, 3D matrix, numberChannel x numberSample x numberSequence
-                   stimOnset - trigger information for all trials, 2D matrix, numberTrial x numberSequence
-                   targetOnset - trigger information for target events, vector, 1 x numberSequence
+                   timeseries - eeg signals, 3D matrix,
+                        num_channel x num_sample x num_seq
+                   stimOnset - trigger information for all trials, 2D matrix,
+                        num_trial x num_seq
+                   targetOnset - trigger information for target events, vector,
+                        1 x num_seq
              fs: sampling frequency (Hz), scaler real value, double
              pardigm: the experiment paradigm, either 'FRP' or 'ERP'
-             mode: the signal model mode, which is either 'modelfitting' or 'simulator'
-             saveingPath: the directory of saving figures
-             userID: the user's ID (is already included in the file's name)
+             mode: the signal model mode,
+                which is either 'modelfitting' or 'simulator'
+             path_save: the directory of saving figures
+             id_user: the user's ID (is already included in the file's name)
     """
     # Initialization
     eeg = data["timeseries"]
-    trigOnsets = data["stimOnset"]
-    targetOnsets = data["targetOnset"][0]
-    ds = 100   # time shift that sets the visualization interval
-    dt = fs-ds-1
-    time = np.arange(0, dt+1., 1)/fs
-    numSeq = eeg.shape[2]
-    numTrial = trigOnsets.shape[0]
-    numChannel = eeg.shape[0]
+    onset_trig = data["stimOnset"]
+    onset_target = data["targetOnset"][0]
+    ds = 100  # time shift that sets the visualization interval
+    dt = fs - ds - 1
+    time = np.arange(0, dt + 1., 1) / fs
+    num_seq = eeg.shape[2]
+    num_trial = onset_trig.shape[0]
+    num_channel = eeg.shape[0]
     fig = plt.figure()
     ax1 = fig.add_subplot(211)
     ax2 = fig.add_subplot(212, sharex=ax1, sharey=ax1)
     fig.subplots_adjust(hspace=.5)
-    dy = .5 # setting ylim
+    dy = .5  # setting ylim
 
-    if paradigm=="FRP":
-        frp_neg = np.zeros((numChannel, dt+1, numSeq))
-        frp_pos = np.zeros((numChannel, dt+1, numSeq))
+    if paradigm == "FRP":
+        frp_neg = np.zeros((num_channel, dt + 1, num_seq))
+        frp_pos = np.zeros((num_channel, dt + 1, num_seq))
         i_neg = 0
         i_pos = 0
         # Extracting all traget-event related activities
-        for s in range(numSeq):
-            if targetOnsets[s] > 0:
-                frp_neg[:,:,i_neg] = eeg[:,trigOnsets[0,s]-1:trigOnsets[0,s]+dt,s]
-                i_neg +=1
+        for s in range(num_seq):
+            if onset_target[s] > 0:
+                frp_neg[:, :, i_neg] = eeg[:, onset_trig[0, s] -
+                                              1:onset_trig[0, s] + dt, s]
+                i_neg += 1
             else:
-                frp_pos[:,:,i_pos] = eeg[:,trigOnsets[0,s]-1:trigOnsets[0,s]+dt,s]
-                i_pos +=1
-        # Compute the average responses
-        meanNegFRPs = np.mean(frp_neg[:,:,:i_neg],2)
-        meanPosFRPs = np.mean(frp_pos[:,:,:i_pos],2)
-        for ch in range(numChannel):
-            ax1.plot(time, meanNegFRPs[ch,:])
-            ax2.plot(time, meanPosFRPs[ch,:])
+                frp_pos[:, :, i_pos] = eeg[:, onset_trig[0, s] -
+                                              1:onset_trig[0, s] + dt, s]
+                i_pos += 1
+        # Compute the average responses for negative and positive FRPs
+        mean_frp_n = np.mean(frp_neg[:, :, :i_neg], 2)
+        mean_frp_p = np.mean(frp_pos[:, :, :i_pos], 2)
+        for ch in range(num_channel):
+            ax1.plot(time, mean_frp_n[ch, :])
+            ax2.plot(time, mean_frp_p[ch, :])
         ax1.set_title('Average -FRPs')
         ax1.set_ylabel(r'EEG ($\mu$V)')
-        ax1.set_xlim([0,.6])
-        ax1.set_ylim([np.min([np.min(meanNegFRPs),np.min(meanPosFRPs)])-dy,
-                      np.max([np.max(meanNegFRPs),np.max(meanPosFRPs)])+dy])
+        ax1.set_xlim([0, .6])
+        ax1.set_ylim([np.min([np.min(mean_frp_n), np.min(mean_frp_p)]) - dy,
+                      np.max([np.max(mean_frp_n), np.max(mean_frp_p)]) + dy])
         ax2.set_title('Average +FRPs')
         ax2.set_xlabel('Time (Sec)')
         ax2.set_ylabel(r'EEG ($\mu$V)')
     else:
-        erp = np.zeros((numChannel, dt+1, numSeq))
-        nonerp = np.zeros((numChannel, dt+1, numSeq*numTrial))
+        erp = np.zeros((num_channel, dt + 1, num_seq))
+        nonerp = np.zeros((num_channel, dt + 1, num_seq * num_trial))
         m = 0
         # Extracting all traget-event related activities
-        for s in range(numSeq):
-            erp[:,:,s] = eeg[:,targetOnsets[s]-1:targetOnsets[s]+dt,s]
+        for s in range(num_seq):
+            erp[:, :, s] = eeg[:, onset_target[s] - 1:onset_target[s] + dt, s]
         m = 0
         # Extracting all nontraget-event related activities
-        for s in range(numSeq):
-            for t in range(numTrial):
-                if trigOnsets[t,s]==targetOnsets[s]:
+        for s in range(num_seq):
+            for t in range(num_trial):
+                if onset_trig[t, s] == onset_target[s]:
                     continue
                 else:
-                    nonerp[:,:,m] = eeg[:,trigOnsets[t,s]-1:trigOnsets[t,s]+dt,s]
-                    m +=1
+                    nonerp[:, :, m] = eeg[:, onset_trig[t, s] -
+                                             1:onset_trig[t, s] + dt, s]
+                    m += 1
         # Compute the average responses
-        meanERPs = np.mean(erp,2)
-        meannonERPs = np.mean(nonerp[:,:,:m],2)
-        for ch in range(numChannel):
-            ax1.plot(time, meanERPs[ch,:])
-            ax2.plot(time, meannonERPs[ch,:])
+        mean_erp_p = np.mean(erp, 2)
+        mean_erp_n = np.mean(nonerp[:, :, :m], 2)
+        for ch in range(num_channel):
+            ax1.plot(time, mean_erp_p[ch, :])
+            ax2.plot(time, mean_erp_n[ch, :])
         ax1.set_title('Average ERPs')
         ax1.set_ylabel(r'EEG ($\mu$V)')
-        ax1.set_xlim([0,.6])
-        ax1.set_ylim([np.min([np.min(meanERPs),np.min(meannonERPs)])-dy,
-                      np.max([np.max(meanERPs),np.max(meannonERPs)])+dy])
+        ax1.set_xlim([0, .6])
+        ax1.set_ylim([np.min([np.min(mean_erp_p), np.min(mean_erp_n)]) - dy,
+                      np.max([np.max(mean_erp_p), np.max(mean_erp_n)]) + dy])
         ax2.set_title('Average non-ERPs')
         ax2.set_xlabel('Time (Sec)')
         ax2.set_ylabel(r'EEG ($\mu$V)')
     fig.show()
     # Save generated figures
-    if savingPath:
+    if path_save:
         try:
-            fig.savefig(savingPath+userID+mode+'.pdf', format='pdf', dpi=1000,
-                                                     bbox_inches='tight')
+            fig.savefig(path_save + id_user + mode + '.pdf', format='pdf',
+                        dpi=1000, bbox_inches='tight')
         except:
-            print CRED+'Can not save the file! The file',userID+mode+'.pdf',' might be open.'+CEND
-
-
-
-
-
-
-
-
-
+            # TODO: this is not the only possible error
+            print CRED + 'Can not save the file! The file', \
+                id_user + mode + '.pdf might be open.' + CEND
