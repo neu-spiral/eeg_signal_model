@@ -1,8 +1,7 @@
-import os, sys #, pickle
+import os, sys, pickle
 import scipy.io as sio
 import numpy as np
 from signal_model.ARXmodelFit import ARXmodelfit
-import signal_model.pickle as pickle
 from signal_model.meanBrainRespVisualiz import meanBrainRespVisualiz
 
 CRED = '\033[31m'
@@ -18,9 +17,9 @@ fileNum = 1
 hyperParameterLearning = True
 # set directories including data and to save files
 try:
-    file_dir = "./data/"+paradigm+"s"       # data directory (data should be in MATLAB)
-    fig_dir = "./figures/"+paradigm+"s/"    # path to save figures
-    model_dir = "./model/"+paradigm+"s/"    # path to save model parameters and synthetic data
+    file_dir = "./data/" + paradigm + "s"  # data directory (data should be in MATLAB)
+    fig_dir = "./figures/" + paradigm + "s/"  # path to save figures
+    model_dir = "./model/" + paradigm + "s/"  # path to save model parameters and synthetic data
 except:
     print CRED + 'Make sure you have all of the required folders and subfolders!' + CEND
     sys.exit()
@@ -28,7 +27,7 @@ except:
 allDir = [file_dir, fig_dir, model_dir]
 for dir in allDir:
     if not os.path.isdir(dir):
-        print CRED + 'There is not directory as',dir + CEND
+        print CRED + 'There is not directory as', dir + CEND
         sys.exit()
 try:
     # list of files' name in the data directory
@@ -39,8 +38,8 @@ except:
     print CRED + 'Make sure data folder includes .mat data for the selected paradigm!' + CEND
     sys.exit()
 
-eegCh = range(16)     # number of eeg channels
-nFold = 5          # number of fold in cross validation
+eegCh = range(16)  # number of eeg channels
+nFold = 5  # number of fold in cross validation
 # load filename and initialize the user from MATLAB file
 data = dict()
 data['stimOnset'] = tmp['us']
@@ -60,7 +59,7 @@ if paradigm != "FRP" and paradigm != "ERP":
     print CRED + "Please enter a valid paradigm e.g. FRP or ERP!" + CEND
     sys.exit()
 # Print the user id and AUC value saved in the file
-print '\n', 'User:', userID, '\n','\n'
+print '\n', 'User:', userID, '\n', '\n'
 print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 
 #
@@ -75,7 +74,7 @@ print 'Running in', mode, 'mode, under', paradigm, 'paradigm.', '\n'
 # Run the EEG signal model based on the predefined mode
 if mode == "simulator":
     try:
-        with open(model_dir+userID+'_modelParam.p', "rb") as f:
+        with open(model_dir + userID + '_modelParam.p', "rb") as f:
             model_dic = pickle.load(f)
         f.close()
     except:
@@ -88,12 +87,12 @@ if mode == "simulator":
     stimOnset = tmp['us']
     targetOnset = tmp['ue']
     modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                            numSeq=numSeq, numSamp=numSam, channels=channels,
-                            hyperparameter=hyperparameter, orderSelection=False)
+                           numSeq=numSeq, numSamp=numSam, channels=channels,
+                           hyperparameter=hyperparameter, orderSelection=False)
     syn_data = modelObj.syntheticEEGseq(parameters, stimOnset, targetOnset)
     meanBrainRespVisualiz(syn_data, fs, paradigm, mode, fig_dir, userID)
     if saveFlag:
-        with open(model_dir+userID+'_syntheticData.p', "wb") as f:
+        with open(model_dir + userID + '_syntheticData.p', "wb") as f:
             pickle.dump(syn_data, f)
         f.close()
 
@@ -103,17 +102,18 @@ elif mode == "modelfitting":
     # set a range of hyperparameters for grid search
     hyperparameter = tmp['hyperparameters']
     modelObj = ARXmodelfit(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                            numSeq=numSeq, numSamp=numSam, channels=channels,
-                            hyperparameter=hyperparameter, orderSelection=True)
-    auc, acc, parameters, hyperParam = modelObj.ARXmodelfit(data=data, nFold=nFold)
-    print 'AUC:',np.mean(auc),u'\u00B1',np.std(auc)
-    print 'ACC:', np.mean(acc),u'\u00B1',np.std(acc)
+                           numSeq=numSeq, numSamp=numSam, channels=channels,
+                           hyperparameter=hyperparameter, orderSelection=True)
+    auc, acc, parameters, hyperParam = modelObj.ARXmodelfit(data=data,
+                                                            nFold=nFold)
+    print 'AUC:', np.mean(auc), u'\u00B1', np.std(auc)
+    print 'ACC:', np.mean(acc), u'\u00B1', np.std(acc)
     if saveFlag:
         save_dic = {"parameters": parameters,
                     "hyperparameters": hyperParam,
                     "accuracy": auc,
                     "auc": acc}
-        with open(model_dir+userID+'_modelParam.p', "wb") as f:
+        with open(model_dir + userID + '_modelParam.p', "wb") as f:
             pickle.dump(save_dic, f)
         f.close()
 
@@ -123,8 +123,3 @@ elif mode == "visualization":
 else:
     print CRED + mode, 'is NOT defined!' + CEND
     sys.exit()
-
-
-
-
-
