@@ -10,7 +10,8 @@ CEND = '\033[0m'
 
 warnings.filterwarnings("ignore")
 
-class ARXmodelfit(object):
+
+class ARXModel(object):
     """
         Given the EEG data and visual stimuli information across sequences,
         this class fits an ARX model to EEG signals.
@@ -27,11 +28,11 @@ class ARXmodelfit(object):
             compOrder ---> polynomial order of the gamma function, int
             threshold ---> convergence criteria in cyclyc decent method, double
             channels ---> list of EEG channels or sources, char
-            numTrial ---> number of trial in a sequence, int
-            numSamp ---> number of data sample in a sequence, int
-            ARorder ---> AR model order, could be a vector or scaler, int
+            num_trial ---> number of trial in a sequence, int
+            num_sample ---> number of data sample in a sequence, int
+            order_AR ---> AR model order, could be a vector or scaler, int
             delays --->  delays of gamma functions, vector, double
-            numSeq ---> total number of sequences, int
+            num_seq ---> total number of sequences, int
             tau --->  Kurtosis of gamma functions, vector, int
             fs ---> sampling frequency (Hz), scaler real value, double
 
@@ -50,22 +51,23 @@ class ARXmodelfit(object):
             invCov
     """
 
-    def __init__(self, fs, paradigm, numTrial, numSeq, numSamp, hyperparameter,
-                 channels, threshold=1e-6, orderSelection=False):
+    def __init__(self, fs, paradigm, num_trial, num_seq, num_sample,
+                 hyperparameter, channels, threshold=1e-6,
+                 orderSelection=False):
         self.fs = fs
         self.paradigm = paradigm
         self.channels = channels
-        self.numSamp = numSamp
-        self.numSeq = numSeq
-        self.numTrial = numTrial
+        self.num_sample = num_sample
+        self.numSeq = num_seq
+        self.numTrial = num_trial
 
         if orderSelection:
-            self.ARorder = hyperparameter[:,0]
-            self.tau = hyperparameter[:,1:4]
-            self.delays = hyperparameter[:,4:7]
-            self.compOrder = hyperparameter[0,7:]
+            self.order_AR = hyperparameter[:, 0]
+            self.tau = hyperparameter[:, 1:4]
+            self.delays = hyperparameter[:, 4:7]
+            self.compOrder = hyperparameter[0, 7:]
         else:
-            self.ARorder = hyperparameter[0]
+            self.order_AR = hyperparameter[0]
             self.tau = hyperparameter[1:4]
             self.delays = hyperparameter[4:7]
             self.compOrder = hyperparameter[7:]
@@ -73,8 +75,7 @@ class ARXmodelfit(object):
         self.threshold = threshold
         self.orderSelection = orderSelection
 
-
-    def ARXmodelfit(self, data, nFold = 10):
+    def ARXmodelfit(self, data, nFold=10):
         """
             fits an ARX model to the multi-channel/ brain sources timeseries
             signal using the cyclic decent method
@@ -85,15 +86,15 @@ class ARXmodelfit(object):
                 orderSelection: True if you want to set hyperparmeters by BIC
                                 and grid search (boolean)
             Return:
-                AUC: AUC of the classifier at each fold (nFold x 1)
-                ACC: accuracy of the classifier at each fold (nFold x 1)
+                auc: auc of the classifier at each fold (nFold x 1)
+                acc: accuracy of the classifier at each fold (nFold x 1)
                 parameters: best parameters for each channel/brain sources
                 hyperParam: hyperparameters of the ARX model for all channel
         """
         # Initialization
         auc_ch = np.zeros((nFold, len(self.channels)))
-        AUC = np.zeros((nFold, 1))
-        ACC = np.zeros((nFold, 1))
+        auc = np.zeros((nFold, 1))
+        acc = np.zeros((nFold, 1))
         # the maximum size of the parameters assumed to be 300
         parameter_hat = np.zeros((nFold, 300, len(self.channels)))
         trialTargetness = []
@@ -102,33 +103,38 @@ class ARXmodelfit(object):
 
         # Time resolution for delays in grid search for model order selection
         if self.orderSelection:
-            dD = np.round(.005*float(self.fs))
-            delay0 = [int(self.delays[0][0]+i*dD) for i in
-                      range(int((self.delays[1][0] - self.delays[0][0])*dD+1))]
-            delay1 = [int(self.delays[0][1]+i*dD) for i in
-                      range(int((self.delays[1][1] - self.delays[0][1])*dD+1))]
-            delay2 = [int(self.delays[0][2]+i*dD) for i in
-                      range(int((self.delays[1][2] - self.delays[0][2])*dD+1))]
-            AR_range = range(self.ARorder[0],self.ARorder[1]+1)
-            tau0_range = range(self.tau[0][0],self.tau[1][0]+1)
-            tau1_range = range(self.tau[0][1],self.tau[1][1]+1)
-            tau2_range = range(self.tau[0][2],self.tau[1][2]+1)
+            dD = np.round(.005 * float(self.fs))
+            delay0 = [int(self.delays[0][0] + i * dD) for i in
+                      range(int(
+                          (self.delays[1][0] - self.delays[0][0]) * dD + 1))]
+            delay1 = [int(self.delays[0][1] + i * dD) for i in
+                      range(int(
+                          (self.delays[1][1] - self.delays[0][1]) * dD + 1))]
+            delay2 = [int(self.delays[0][2] + i * dD) for i in
+                      range(int(
+                          (self.delays[1][2] - self.delays[0][2]) * dD + 1))]
+            AR_range = range(self.order_AR[0], self.order_AR[1] + 1)
+            tau0_range = range(self.tau[0][0], self.tau[1][0] + 1)
+            tau1_range = range(self.tau[0][1], self.tau[1][1] + 1)
+            tau2_range = range(self.tau[0][2], self.tau[1][2] + 1)
 
         # training the model within K-fold cross validation
         y_test, y_train, us_test, us_train, ue_test, ue_train = \
             self.data_for_corssValidation(data, nFold)
 
         # Create Object
-        prog = pyprog.ProgressBar(" ", "", total=nFold*len(self.channels))
+        pb = pyprog.ProgressBar(" ", "", total=nFold * len(self.channels))
         # Update Progress Bar
-        prog.update()
+        pb.update()
         for f in range(nFold):
             data_train = dict()
             data_test = dict()
-            data_train.update({"timeseries":y_train[f], "stimOnset":us_train[f],
-                          "targetOnset":ue_train[f], "numSeq":ue_train[f].shape[1]})
-            data_test.update({"timeseries":y_test[f], "stimOnset":us_test[f],
-                         "targetOnset":ue_test[f], "numSeq":ue_test[f].shape[1]})
+            data_train.update(
+                {"timeseries": y_train[f], "stimOnset": us_train[f],
+                 "targetOnset": ue_train[f], "numSeq": ue_train[f].shape[1]})
+            data_test.update({"timeseries": y_test[f], "stimOnset": us_test[f],
+                              "targetOnset": ue_test[f],
+                              "numSeq": ue_test[f].shape[1]})
             # Parameters estimation for each channel/brain sources
             numSeq_train = data_train["numSeq"]
             numSeq_test = data_test["numSeq"]
@@ -145,32 +151,32 @@ class ARXmodelfit(object):
                                     for d0 in [delay0[0]]:
                                         for d1 in [delay1[0]]:
                                             for d2 in [delay2[0]]:
-                                                nParam = [k,
-                                                          k+sum(self.compOrder),
-                                                          k+sum(self.compOrder)+1]
-                                                self.ARorder = k
+                                                self.order_AR = k
                                                 self.tau = [tau0, tau1, tau2]
                                                 self.delays = [d0, d1, d2]
                                                 self.numSeq
                                                 param, _, _, _, _, _ = \
-                                                self.cyclic_decent_method(
-                                                                 data_train, ch)
-                                                data_test["coeff"] = 1
-                                                auc_, _,_,_ = self.model_eval(
-                                                                param,
-                                                                data_test, [ch])
-                                                _, loglike, sigma_hat, \
-                                                _, _, _  = \
                                                     self.cyclic_decent_method(
-                                                                 data_test, ch)
+                                                        data_train, ch)
+                                                data_test["coeff"] = 1
+                                                auc_, _, _, _ = self.model_eval(
+                                                    param,
+                                                    data_test, [ch])
+                                                _, loglike, sigma_hat, \
+                                                _, _, _ = \
+                                                    self.cyclic_decent_method(
+                                                        data_test, ch)
                                                 hyperparameters.append([k,
                                                                         self.tau,
-                                                    self.delays, self.compOrder])
+                                                                        self.delays,
+                                                                        self.compOrder])
                                                 error.append(sigma_hat[0])
                                                 auc.append(auc_)
-                        # Find the optimal ARorder, tau, delay, and compOrder according to AUC
-                        indx1 = [i for i in range(len(auc)) if auc[i] == max(auc)]
-                        indx2 = [i for i in range(len(indx1)) if error[i] == min(error)]
+                        # Find the optimal ARorder, tau, delay, and compOrder according to auc
+                        indx1 = [i for i in range(len(auc)) if
+                                 auc[i] == max(auc)]
+                        indx2 = [i for i in range(len(indx1)) if
+                                 error[i] == min(error)]
 
                         if indx1 and indx2:
                             self.tau = hyperparameters[indx1[indx2[0]]][1]
@@ -180,66 +186,72 @@ class ARXmodelfit(object):
                             hyperparameters.append([k, self.tau, self.delays,
                                                     self.compOrder])
 
-                        nParam = [k, k + sum(self.compOrder),
-                                  k + sum(self.compOrder) + 1]
-                        _, L, _, _, _, _ = self.cyclic_decent_method(data_test, ch)
+                        _, L, _, _, _, _ = self.cyclic_decent_method(data_test,
+                                                                     ch)
                         # Compute BIC measure for AR model order selection
-                        bic.append(L + k*np.log(numSeq_train*(numSeq_test - k)))
+                        bic.append(
+                            L + k * np.log(numSeq_train * (numSeq_test - k)))
 
                     indx = [i for i in range(len(bic)) if bic[i] == min(bic)]
-                    self.ARorder = AR_range[indx[0]]
+                    self.order_AR = AR_range[indx[0]]
                     self.tau = hyperparameters[indx[0]][1]
                     self.delays = hyperparameters[indx[0]][2]
                     self.compOrder = hyperparameters[indx[0]][3]
 
-                nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
-                          self.ARorder + sum(self.compOrder) + 1]
+                nParam = [self.order_AR, self.order_AR + sum(self.compOrder),
+                          self.order_AR + sum(self.compOrder) + 1]
                 param, _, _, _, _, _ = \
                     self.cyclic_decent_method(data_train, ch)
                 if self.paradigm == "FRP":
-                    parameter_hat[f,0:2*nParam[-1],ch] = param[:,0]
+                    parameter_hat[f, 0:2 * nParam[-1], ch] = param[:, 0]
                 else:
-                    parameter_hat[f,0:nParam[-1],ch] = param[:,0]
+                    parameter_hat[f, 0:nParam[-1], ch] = param[:, 0]
 
-                auc_ch[f,ch], acc_ch, score_, trialTargetness = \
+                auc_ch[f, ch], acc_ch, score_, trialTargetness = \
                     self.model_eval(param, data_test, [ch])
                 score.append(score_)
 
-            scores = np.zeros((score[0].shape[0],len(self.channels)))
+            scores = np.zeros((score[0].shape[0], len(self.channels)))
 
             for ch in range(len(self.channels)):
-                scores[:,ch] = score[ch]
+                scores[:, ch] = score[ch]
 
-            _, _,data_test["coeff"], _ = self.multiChanenelCoeff(scores, trialTargetness)
+            _, _, data_test["coeff"], _ = self.multiChanenelCoeff(scores,
+                                                                  trialTargetness)
             if self.paradigm == "FRP":
-                AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:2*nParam[-1],:],
-                                         data_test, range(len(self.channels)))
+                auc[f], acc[f], _, _ = self.model_eval(
+                    parameter_hat[f, 0:2 * nParam[-1], :],
+                    data_test, range(len(self.channels)))
             else:
-                AUC[f], ACC[f], _, _ = self.model_eval(parameter_hat[f,0:nParam[-1],:],
-                                         data_test, range(len(self.channels)))
+                auc[f], acc[f], _, _ = self.model_eval(
+                    parameter_hat[f, 0:nParam[-1], :],
+                    data_test, range(len(self.channels)))
                 count += 1
                 # Set current status
-                prog.set_stat(count)
+                pb.set_stat(count)
                 # Update Progress Bar again
-                prog.update()
+                pb.update()
 
         # Make the Progress Bar final
-        prog.end()
+        pb.end()
         if self.paradigm == "FRP":
-            parameters = np.zeros((len(self.channels), 2*nParam[-1]))
+            parameters = np.zeros((len(self.channels), 2 * nParam[-1]))
         else:
             parameters = np.zeros((len(self.channels), nParam[-1]))
         # Pick best parameters for each channel/brain source
         for ch in range(len(self.channels)):
-            best_ind = [i for i in range(nFold) if auc_ch[i, ch] == max(auc_ch[:, ch])]
+            best_ind = [i for i in range(nFold) if
+                        auc_ch[i, ch] == max(auc_ch[:, ch])]
             if self.paradigm == "FRP":
-                parameters[ch, :] = parameter_hat[best_ind[0], 0:2*nParam[-1], ch]
+                parameters[ch, :] = parameter_hat[best_ind[0], 0:2 * nParam[-1],
+                                    ch]
             else:
                 parameters[ch, :] = parameter_hat[best_ind[0], 0:nParam[-1], ch]
 
-        hyperParam = [self.ARorder]+self.tau+self.delays+list(self.compOrder)
+        hyperParam = [self.order_AR] + self.tau + self.delays + list(
+            self.compOrder)
 
-        return AUC, ACC, parameters, hyperParam
+        return auc, acc, parameters, hyperParam
 
     def data_for_corssValidation(self, data, nFold=10):
         """
@@ -257,17 +269,15 @@ class ARXmodelfit(object):
                 ue_train: a list of target locations across all training folds
         """
         # Initilization
-        foldSampSize = np.floor(self.numSeq/nFold)
+        foldSampSize = np.floor(self.numSeq / nFold)
         eeg = data["timeseries"]
         trigOnsets = data["stimOnset"]
         targetOnsets = data["targetOnset"]
-        data_train = dict()
-        data_test = dict()
         # shuffling data set
         indx = np.random.permutation(self.numSeq)
-        eeg_sh = eeg[:,:,indx]
-        trigOnsets_sh = trigOnsets[:,indx]
-        targetOnsets_sh = targetOnsets[:,indx]
+        eeg_sh = eeg[:, :, indx]
+        trigOnsets_sh = trigOnsets[:, indx]
+        targetOnsets_sh = targetOnsets[:, indx]
         y_train = []
         y_test = []
         us_train = []
@@ -276,14 +286,16 @@ class ARXmodelfit(object):
         ue_test = []
 
         if self.paradigm == "FRP":
-            ind_frp_neg = [i for i in range(self.numSeq) if targetOnsets_sh[0,i] > 0]
-            ind_frp_pos = [i for i in range(self.numSeq) if targetOnsets_sh[0,i] == 0]
-            y_train_pos = eeg_sh[:,:,ind_frp_pos]
-            y_train_neg = eeg_sh[:,:,ind_frp_neg]
-            us_train_pos = trigOnsets_sh[:,ind_frp_pos]
-            us_train_neg = trigOnsets_sh[:,ind_frp_neg]
-            ue_train_pos = targetOnsets_sh[:,ind_frp_pos]
-            ue_train_neg = targetOnsets_sh[:,ind_frp_neg]
+            ind_frp_neg = [i for i in range(self.numSeq) if
+                           targetOnsets_sh[0, i] > 0]
+            ind_frp_pos = [i for i in range(self.numSeq) if
+                           targetOnsets_sh[0, i] == 0]
+            y_train_pos = eeg_sh[:, :, ind_frp_pos]
+            y_train_neg = eeg_sh[:, :, ind_frp_neg]
+            us_train_pos = trigOnsets_sh[:, ind_frp_pos]
+            us_train_neg = trigOnsets_sh[:, ind_frp_neg]
+            ue_train_pos = targetOnsets_sh[:, ind_frp_pos]
+            ue_train_neg = targetOnsets_sh[:, ind_frp_neg]
             y_train_pos_ = copy(y_train_pos)
             y_train_neg_ = copy(y_train_neg)
             us_train_pos_ = copy(us_train_pos)
@@ -306,39 +318,48 @@ class ARXmodelfit(object):
                     us_test_neg = copy(us_train_neg)
                     ue_test_pos = copy(ue_train_pos)
                     ue_test_neg = copy(ue_train_neg)
-                    y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
-                    us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
-                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),1))
-                    y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
-                    us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
-                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),1))
+                    y_train.append(
+                        np.concatenate((y_train_pos, y_train_neg), 2))
+                    us_train.append(
+                        np.concatenate((us_train_pos, us_train_neg), 1))
+                    ue_train.append(
+                        np.concatenate((ue_train_pos, ue_train_neg), 1))
+                    y_test.append(np.concatenate((y_test_pos, y_test_neg), 2))
+                    us_test.append(
+                        np.concatenate((us_test_pos, us_test_neg), 1))
+                    ue_test.append(
+                        np.concatenate((ue_test_pos, ue_test_neg), 1))
                 else:
                     y_test.append(y_train_)
                     us_test.append(us_train_)
                     ue_test.append(ue_train_)
             else:
                 if self.paradigm == "FRP":
-                    testIndx = range(int(f*np.floor(foldSampSize/2)),
-                                     int((f+1)*np.floor(foldSampSize/2)))
+                    testIndx = range(int(f * np.floor(foldSampSize / 2)),
+                                     int((f + 1) * np.floor(foldSampSize / 2)))
                     testIndx_neg = testIndx
                     testIndx_pos = testIndx
-                    indx_neg = [ti for ti in range(len(testIndx)) if testIndx[ti] > len(ind_frp_neg)-1]
-                    indx_pos = [ti for ti in range(len(testIndx)) if testIndx[ti] > len(ind_frp_pos)-1]
+                    indx_neg = [ti for ti in range(len(testIndx)) if
+                                testIndx[ti] > len(ind_frp_neg) - 1]
+                    indx_pos = [ti for ti in range(len(testIndx)) if
+                                testIndx[ti] > len(ind_frp_pos) - 1]
 
                     if indx_neg:
                         testIndx_neg = testIndx[:indx_neg[0]]
                     if indx_pos:
                         testIndx_pos = testIndx[:indx_pos[0]]
 
-                    y_test_pos = copy(y_train_pos_[:,:,testIndx_pos])
-                    y_test_neg = copy(y_train_neg_[:,:,testIndx_neg])
-                    us_test_pos = copy(us_train_pos_[:,testIndx_pos])
-                    us_test_neg = copy(us_train_neg_[:,testIndx_neg])
-                    ue_test_pos = copy(ue_train_pos_[:,testIndx_pos])
-                    ue_test_neg = copy(ue_train_neg_[:,testIndx_neg])
-                    y_test.append(np.concatenate((y_test_pos,y_test_neg),2))
-                    us_test.append(np.concatenate((us_test_pos,us_test_neg),1))
-                    ue_test.append(np.concatenate((ue_test_pos,ue_test_neg),1))
+                    y_test_pos = copy(y_train_pos_[:, :, testIndx_pos])
+                    y_test_neg = copy(y_train_neg_[:, :, testIndx_neg])
+                    us_test_pos = copy(us_train_pos_[:, testIndx_pos])
+                    us_test_neg = copy(us_train_neg_[:, testIndx_neg])
+                    ue_test_pos = copy(ue_train_pos_[:, testIndx_pos])
+                    ue_test_neg = copy(ue_train_neg_[:, testIndx_neg])
+                    y_test.append(np.concatenate((y_test_pos, y_test_neg), 2))
+                    us_test.append(
+                        np.concatenate((us_test_pos, us_test_neg), 1))
+                    ue_test.append(
+                        np.concatenate((ue_test_pos, ue_test_neg), 1))
                     tmp = copy(y_train_pos_)
                     y_train_pos = np.delete(tmp, testIndx_pos, 2)
                     tmp = copy(y_train_neg_)
@@ -351,15 +372,18 @@ class ARXmodelfit(object):
                     ue_train_pos = np.delete(tmp, testIndx_pos, 1)
                     tmp = copy(ue_train_neg_)
                     ue_train_neg = np.delete(tmp, testIndx_neg, 1)
-                    y_train.append(np.concatenate((y_train_pos,y_train_neg),2))
-                    us_train.append(np.concatenate((us_train_pos,us_train_neg),1))
-                    ue_train.append(np.concatenate((ue_train_pos,ue_train_neg),1))
+                    y_train.append(
+                        np.concatenate((y_train_pos, y_train_neg), 2))
+                    us_train.append(
+                        np.concatenate((us_train_pos, us_train_neg), 1))
+                    ue_train.append(
+                        np.concatenate((ue_train_pos, ue_train_neg), 1))
                 else:
-                    testIndx = range(int(f*np.floor(foldSampSize)),
-                                     int((f+1)*np.floor(foldSampSize)))
-                    y_test.append(y_train_[:,:,testIndx])
-                    us_test.append(us_train_[:,testIndx])
-                    ue_test.append(ue_train_[:,testIndx])
+                    testIndx = range(int(f * np.floor(foldSampSize)),
+                                     int((f + 1) * np.floor(foldSampSize)))
+                    y_test.append(y_train_[:, :, testIndx])
+                    us_test.append(us_train_[:, testIndx])
+                    ue_test.append(ue_train_[:, testIndx])
                     tmp = copy(y_train_)
                     y_train.append(np.delete(tmp, testIndx, 2))
                     tmp = copy(us_train_)
@@ -368,7 +392,6 @@ class ARXmodelfit(object):
                     ue_train.append(np.delete(tmp, testIndx, 1))
 
         return y_test, y_train, us_test, us_train, ue_test, ue_train
-
 
     def model_eval(self, parameter, data, channel):
         """
@@ -391,84 +414,90 @@ class ARXmodelfit(object):
         us = data["stimOnset"]
         ue = data["targetOnset"]
         # Initialization
-        label = np.zeros((numSeq,1))
+        label = np.zeros((numSeq, 1))
         coeff = data["coeff"]
-        score = np.zeros((len(channel), numSeq*(self.numTrial+1)))
+        score = np.zeros((len(channel), numSeq * (self.numTrial + 1)))
         if self.paradigm == "FRP":
             loglikelihood = np.zeros((numSeq, 2, len(channel)))
             trialTargetness = np.zeros((numSeq, 2))
         else:
-            loglikelihood = np.zeros((numSeq, self.numTrial+1, len(channel)))
-            trialTargetness = np.zeros((numSeq, self.numTrial+1))
+            loglikelihood = np.zeros((numSeq, self.numTrial + 1, len(channel)))
+            trialTargetness = np.zeros((numSeq, self.numTrial + 1))
 
         # Computing loglikehood scores for each possible target location
         for seq in range(numSeq):
             if self.paradigm == "FRP":
                 sc = np.zeros((len(channel), numSeq))
                 # negative sequences
-                if ue[0,seq] > 0:
-                    label[seq,0] = 1
-                    trialTargetness[seq,1] = 1
-                    trialTargetness[seq,0] = 0
+                if ue[0, seq] > 0:
+                    label[seq, 0] = 1
+                    trialTargetness[seq, 1] = 1
+                    trialTargetness[seq, 0] = 0
                 # positive sequences
                 else:
-                    label[seq,0] = 0
-                    trialTargetness[seq,1] = 0
-                    trialTargetness[seq,0] = 1
+                    label[seq, 0] = 0
+                    trialTargetness[seq, 1] = 0
+                    trialTargetness[seq, 0] = 1
 
-                len_param = parameter.shape[0]/2
+                len_param = parameter.shape[0] / 2
                 # compute loglikelihood score for positive sequences
-                loglikelihood[seq,0,:] = self.loglikelihoodARX(y[channel,:,seq],
-                                         us[:,seq], [], parameter[:len_param,:])
+                loglikelihood[seq, 0, :] = self.loglikelihoodARX(
+                    y[channel, :, seq],
+                    us[:, seq], [], parameter[:len_param, :])
                 # compute loglikelihood score for negative sequences
-                loglikelihood[seq,1,:] = self.loglikelihoodARX(y[channel,:,seq],
-                                         us[:,seq], [], parameter[len_param:,:])
+                loglikelihood[seq, 1, :] = self.loglikelihoodARX(
+                    y[channel, :, seq],
+                    us[:, seq], [], parameter[len_param:, :])
             else:
-                sc = np.zeros((self.numTrial+1, numSeq))
-                targetLoc = ue[0,seq]
-                possibleTarget = np.concatenate(([0], us[:,seq]))
-                for trial in range(self.numTrial+1):
+                sc = np.zeros((self.numTrial + 1, numSeq))
+                targetLoc = ue[0, seq]
+                possibleTarget = np.concatenate(([0], us[:, seq]))
+                for trial in range(self.numTrial + 1):
                     if np.abs(possibleTarget[trial] - targetLoc) < 3:
                         label[seq] = trial + 1
-                        trialTargetness[seq,trial] = 1
+                        trialTargetness[seq, trial] = 1
                     else:
-                        trialTargetness[seq,trial] = 0
-                    loglikelihood[seq,trial,:] = self.loglikelihoodARX(
-                                             y[channel,:,seq], us[:,seq],
-                                            possibleTarget[trial], parameter)
+                        trialTargetness[seq, trial] = 0
+                    loglikelihood[seq, trial, :] = self.loglikelihoodARX(
+                        y[channel, :, seq], us[:, seq],
+                        possibleTarget[trial], parameter)
         # Computing auc and acc of the classifier
         if self.paradigm == "FRP":
             for ch in range(len(channel)):
-                sc[ch,:] = np.matmul(np.array([[-1.,1.]]), (-1)*loglikelihood[:,:,ch].T)
+                sc[ch, :] = np.matmul(np.array([[-1., 1.]]),
+                                      (-1) * loglikelihood[:, :, ch].T)
 
             if len(channel) > 1:
                 # combining multi-channels/brain sources
                 scores = np.matmul(coeff, sc)
             else:
                 scores = copy(sc[0])
-                scores = np.expand_dims(scores, 0)[0,:]
+                scores = np.expand_dims(scores, 0)[0, :]
 
-            auc, acc, _, _ = self.calculateROC(scores, label[:,0])
-            trialTargetness = label[:,0]
+            auc, acc, _, _ = self.calculateROC(scores, label[:, 0])
+            trialTargetness = label[:, 0]
 
         else:
             for ch in range(len(channel)):
-                ss = (-1)*loglikelihood[:,:,ch]
+                ss = (-1) * loglikelihood[:, :, ch]
                 for seq in range(numSeq):
-                    sc[:, seq] = ss[seq,:] - ss[seq, trialTargetness[seq,:] > 0]
-                    sc[sc[:, seq] ==0, seq] = (-1)*np.mean(sc[sc[:, seq]!=0, seq])
+                    sc[:, seq] = ss[seq, :] - ss[
+                        seq, trialTargetness[seq, :] > 0]
+                    sc[sc[:, seq] == 0, seq] = (-1) * np.mean(
+                        sc[sc[:, seq] != 0, seq])
 
-                score[ch,:] = np.reshape(sc,(self.numTrial+1)*numSeq,1)
+                score[ch, :] = np.reshape(sc, (self.numTrial + 1) * numSeq, 1)
 
             if len(channel) > 1:
                 scores = np.matmul(score.T, coeff)
             else:
                 scores = copy(score[0])
 
-            t_target = np.reshape(trialTargetness,(self.numTrial+1)*numSeq,1)
+            t_target = np.reshape(trialTargetness, (self.numTrial + 1) * numSeq,
+                                  1)
             auc, _, _, _ = self.calculateROC(scores, t_target)
-            ss = np.reshape(scores,((self.numTrial+1),numSeq))
-            tt = np.reshape(t_target,((self.numTrial+1),numSeq))
+            ss = np.reshape(scores, ((self.numTrial + 1), numSeq))
+            tt = np.reshape(t_target, ((self.numTrial + 1), numSeq))
             acc = self.calculateACC(ss, tt)
             trialTargetness = []
             trialTargetness = t_target
@@ -501,10 +530,10 @@ class ARXmodelfit(object):
                 s_hat: estimated AR process in the signal model
         """
         # Initialization
-        eeg = data["timeseries"][channel,:,:]
+        eeg = data["timeseries"][channel, :, :]
         trigOnsets = data["stimOnset"]
         numSeq = data["numSeq"]
-        N = self.numSamp - self.ARorder
+        N = self.num_sample - self.order_AR
         Ix = np.identity(N)
         err, b = self.arburg(eeg[:, 0])
         var_hat = .1 * err
@@ -514,14 +543,14 @@ class ARXmodelfit(object):
         Q_inv_FRP = copy(Ix)
         iter = 0
         parameter = []
-        s_hat = np.zeros((self.numSamp, numSeq))
+        s_hat = np.zeros((self.num_sample, numSeq))
         X = []  # design matrix
         # Parameter estimation using cyclic decent method
         while abs(var_hat - var_hat_old) > self.threshold * abs(var_hat_old):
             iter += 1
             var_hat_old = var_hat
-            sig_hat = np.zeros((self.numSamp, numSeq))
-            ar_hat = np.zeros((self.numSamp, numSeq))
+            sig_hat = np.zeros((self.num_sample, numSeq))
+            ar_hat = np.zeros((self.num_sample, numSeq))
             X = []
             y = []
             y_neg = []
@@ -530,8 +559,9 @@ class ARXmodelfit(object):
             Q_inv_s = []
             n_neg = 0
             n_pos = 0
-            z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
-            ar_hat = np.zeros((self.numSamp, numSeq))
+            z = np.zeros(
+                (np.sum(self.compOrder), self.num_sample - self.order_AR))
+            ar_hat = np.zeros((self.num_sample, numSeq))
             if self.paradigm == "FRP":
                 beta_s = np.zeros((np.sum(self.compOrder), 2))
             else:
@@ -541,16 +571,19 @@ class ARXmodelfit(object):
                 vep = np.zeros((self.compOrder[0], N))
                 for trial in range(self.numTrial):
                     input = trigOnsets[trial, s] + self.delays[0]
-                    vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
+                    vep += self.gammafunction(input, self.compOrder[0],
+                                              self.tau[0])
 
                 z[0:self.compOrder[0], :] = vep
                 if self.paradigm == "FRP":
                     input_p = trigOnsets[0, s] + self.delays[1]
                     input_q = trigOnsets[0, s] + self.delays[2]
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
-                        self.gammafunction(input_p, self.compOrder[1], self.tau[1])
+                        self.gammafunction(input_p, self.compOrder[1],
+                                           self.tau[1])
                     z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
-                        self.gammafunction(input_q, self.compOrder[2], self.tau[2])
+                        self.gammafunction(input_q, self.compOrder[2],
+                                           self.tau[2])
                 else:
                     if data["targetOnset"][0][s] > 0:
                         input_p = data["targetOnset"][0][s] + self.delays[1]
@@ -564,11 +597,12 @@ class ARXmodelfit(object):
                         tmp2 = np.zeros((self.compOrder[2], N))
 
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
-                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
+                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder),
+                    :] = tmp2
 
                 # updates the design matrix according to the target/non-target stimuli onsets
                 X.append(z.T)
-                y_s = eeg[self.ARorder:, s]
+                y_s = eeg[self.order_AR:, s]
 
                 # check the experiment paradigm
                 if self.paradigm == "FRP":
@@ -581,7 +615,7 @@ class ARXmodelfit(object):
                             np.linalg.inv(np.matmul(temp, z.T)),
                             np.matmul(temp, y_s))
                         # estimated VEP & ERP terms
-                        sig_hat[self.ARorder:, s] = np.matmul(z.T, beta_s[:, 1])
+                        sig_hat[self.order_AR:, s] = np.matmul(z.T, beta_s[:, 1])
                     else:
                         # positive sequences
                         y_pos.append(y_s)
@@ -590,18 +624,18 @@ class ARXmodelfit(object):
                             np.linalg.inv(np.matmul(temp, z.T)),
                             np.matmul(temp, y_s))
                         # estimated VEP & ERP terms
-                        sig_hat[self.ARorder:, s] = np.matmul(z.T, beta_s[:, 0])
+                        sig_hat[self.order_AR:, s] = np.matmul(z.T, beta_s[:, 0])
 
                 if self.paradigm == "ERP":
                     temp = np.matmul(z, Q_inv)
                     beta_s = np.matmul(np.linalg.inv(np.matmul(temp, z.T)),
                                        np.matmul(temp, y_s))
                     # estimated VEP & ERP terms
-                    sig_hat[self.ARorder:, s] = np.matmul(z.T, beta_s)
+                    sig_hat[self.order_AR:, s] = np.matmul(z.T, beta_s)
                     y.append(y_s)
 
                 # AR series - is this ar_hat + res_hat
-                arProcess_hat.append(y_s - sig_hat[self.ARorder:, s])
+                arProcess_hat.append(y_s - sig_hat[self.order_AR:, s])
                 w_inv, d_vec, q = self.invCov(arProcess_hat[-1], Ix, Ix)
                 Q_inv_s.append(w_inv)
                 Q_inv = copy(w_inv)
@@ -659,7 +693,7 @@ class ARXmodelfit(object):
         if self.paradigm == "FRP":
             parameter_pos = np.concatenate((alpha_hat, beta_hat_pos, sigma_hat))
             parameter_neg = np.concatenate((alpha_hat, beta_hat_neg, sigma_hat))
-            parameter = np.concatenate((parameter_pos,parameter_neg))
+            parameter = np.concatenate((parameter_pos, parameter_neg))
 
         if self.paradigm == "ERP":
             parameter = np.concatenate((alpha_hat, beta_hat, sigma_hat))
@@ -669,19 +703,19 @@ class ARXmodelfit(object):
         loglikelihood = numSeq * logdG + error / sigma_hat
         # Estimated EEG sequences based on the estimated parameters
         for s in range(numSeq):
-            s_tilde = eeg[:self.ARorder, s]
-            noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
-            s_hat[:self.ARorder, s] = noise[0, :self.ARorder]
-            for n in range(self.ARorder, self.numSamp):
-                s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T,alpha_hat) + noise[0,n]
+            s_tilde = eeg[:self.order_AR, s]
+            noise = np.sqrt(sigma_hat) * np.random.randn(self.num_sample)
+            s_hat[:self.order_AR, s] = noise[0, :self.order_AR]
+            for n in range(self.order_AR, self.num_sample):
+                s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T, alpha_hat) + \
+                              noise[0, n]
                 s_tilde = np.concatenate(
                     (s_tilde[1:], np.expand_dims(s_hat[n, s], 0)))
 
-        signal_hat = np.reshape(sig_hat, (self.numSamp, numSeq))
+        signal_hat = np.reshape(sig_hat, (self.num_sample, numSeq))
         y_hat = signal_hat + s_hat
 
         return parameter, loglikelihood, sigma_hat, y_hat, signal_hat, s_hat
-
 
     def syntheticEEGseq(self, parameter, trigOnsets, targetOnset):
         """
@@ -696,13 +730,13 @@ class ARXmodelfit(object):
             Return:
                 syn_data: synthetic data, a dictionary
         """
-        N = self.numSamp - self.ARorder
+        N = self.num_sample - self.order_AR
         Ix = np.identity(N)
         numSeq = targetOnset.shape[1]
-        s_hat = np.zeros((self.numSamp, numSeq))
-        eeg_hat = np.zeros((len(self.channels), self.numSamp, numSeq))
-        nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
-                          self.ARorder + sum(self.compOrder) + 1]
+        s_hat = np.zeros((self.num_sample, numSeq))
+        eeg_hat = np.zeros((len(self.channels), self.num_sample, numSeq))
+        nParam = [self.order_AR, self.order_AR + sum(self.compOrder),
+                  self.order_AR + sum(self.compOrder) + 1]
         # generate multi-channel EEG signals for M sequences
         # Create Object
         prog = pyprog.ProgressBar(" ", "", total=numSeq)
@@ -711,33 +745,37 @@ class ARXmodelfit(object):
         for s in range(numSeq):
             # generate signal for each channel
             for ch in range(len(self.channels)):
-                z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
+                z = np.zeros(
+                    (np.sum(self.compOrder), self.num_sample - self.order_AR))
                 # VEP components
                 vep = np.zeros((self.compOrder[0], N))
                 for trial in range(trigOnsets.shape[0]):
-                    input = trigOnsets[trial,s] + self.delays[0]
-                    vep += self.gammafunction(input, self.compOrder[0], self.tau[0])
+                    input = trigOnsets[trial, s] + self.delays[0]
+                    vep += self.gammafunction(input, self.compOrder[0],
+                                              self.tau[0])
                 z[0:self.compOrder[0], :] = vep
                 if self.paradigm == "FRP":
-                    input_p = trigOnsets[0,s] + self.delays[1]
-                    input_q = trigOnsets[0,s] + self.delays[2]
+                    input_p = trigOnsets[0, s] + self.delays[1]
+                    input_q = trigOnsets[0, s] + self.delays[2]
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = \
-                        self.gammafunction(input_p, self.compOrder[1], self.tau[1])
+                        self.gammafunction(input_p, self.compOrder[1],
+                                           self.tau[1])
                     z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = \
-                        self.gammafunction(input_q, self.compOrder[2], self.tau[2])
+                        self.gammafunction(input_q, self.compOrder[2],
+                                           self.tau[2])
                     # separate parameters for -FRP and +FRP
-                    len_param = parameter.shape[1]/2
-                    if targetOnset[0,s] > 0:
-                        param = parameter[ch,len_param:]
+                    len_param = parameter.shape[1] / 2
+                    if targetOnset[0, s] > 0:
+                        param = parameter[ch, len_param:]
                     else:
-                        param = parameter[ch,:len_param]
+                        param = parameter[ch, :len_param]
                     alpha = param[:nParam[0]]
                     beta = param[nParam[0]:nParam[1]]
                     sigma_hat = param[-1]
                 else:
-                    if targetOnset[0,s] > 0:
-                        input_p = targetOnset[0,s] + self.delays[1]
-                        input_q = targetOnset[0,s] + self.delays[2]
+                    if targetOnset[0, s] > 0:
+                        input_p = targetOnset[0, s] + self.delays[1]
+                        input_q = targetOnset[0, s] + self.delays[2]
                         tmp1 = self.gammafunction(input_p, self.compOrder[1],
                                                   self.tau[1])
                         tmp2 = self.gammafunction(input_q, self.compOrder[2],
@@ -747,35 +785,38 @@ class ARXmodelfit(object):
                         tmp2 = np.zeros((self.compOrder[2], N))
 
                     z[self.compOrder[0]:np.sum(self.compOrder[:2]), :] = tmp1
-                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder), :] = tmp2
-                    alpha = parameter[ch,:nParam[0]]
+                    z[np.sum(self.compOrder[:2]):np.sum(self.compOrder),
+                    :] = tmp2
+                    alpha = parameter[ch, :nParam[0]]
                     beta = parameter[ch, nParam[0]:nParam[1]]
                     sigma_hat = parameter[ch, -1]
                 # estimated VEP & ERP/FRP terms
-                sig_hat = np.concatenate((np.zeros((self.ARorder)), np.matmul(z.T, beta)))
+                sig_hat = np.concatenate(
+                    (np.zeros((self.order_AR)), np.matmul(z.T, beta)))
                 # Estimated EEG sequences based on the estimated parameters
-                s_tilde = np.zeros((self.ARorder,1))
-                noise = np.sqrt(sigma_hat) * np.random.randn(self.numSamp)
-                s_hat[:self.ARorder, s] = noise[:self.ARorder]
-                for n in range(self.ARorder, self.numSamp):
-                    s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T,alpha) + noise[n]
-                    s_tilde[:,0] = np.concatenate([s_tilde[1:,0], np.expand_dims(s_hat[n, s], 0)])
+                s_tilde = np.zeros((self.order_AR, 1))
+                noise = np.sqrt(sigma_hat) * np.random.randn(self.num_sample)
+                s_hat[:self.order_AR, s] = noise[:self.order_AR]
+                for n in range(self.order_AR, self.num_sample):
+                    s_hat[n, s] = np.matmul(np.flip(s_tilde, 0).T, alpha) + \
+                                  noise[n]
+                    s_tilde[:, 0] = np.concatenate(
+                        [s_tilde[1:, 0], np.expand_dims(s_hat[n, s], 0)])
 
-                signal_hat = np.reshape(sig_hat, (self.numSamp, 1))
-                eeg_hat[ch,:,s] = signal_hat[:,0] + s_hat[:,s]
+                signal_hat = np.reshape(sig_hat, (self.num_sample, 1))
+                eeg_hat[ch, :, s] = signal_hat[:, 0] + s_hat[:, s]
             # Set current status
-            prog.set_stat((s+1.))
+            prog.set_stat((s + 1.))
             # Update Progress Bar again
             prog.update()
 
         # Make the Progress Bar final
         prog.end()
         syn_data = dict()
-        syn_data.update({"timeseries":eeg_hat,
-                         "stimOnset":trigOnsets,
-                         "targetOnset":targetOnset})
+        syn_data.update({"timeseries": eeg_hat,
+                         "stimOnset": trigOnsets,
+                         "targetOnset": targetOnset})
         return syn_data
-
 
     def gammafunction(self, x, compOrder, tau):
         """
@@ -807,7 +848,7 @@ class ARXmodelfit(object):
             Onset0 = x
 
         for s in range(N):
-            M = self.numSamp - Onset0 - s * dn + 1
+            M = self.num_sample - Onset0 - s * dn + 1
             m = np.array(range(int(M)))
             z = []  # np.zeros((comp_order, M))
 
@@ -822,7 +863,7 @@ class ARXmodelfit(object):
                 z = z.reshape()
                 y += np.concatenate((temp, z), 0)
 
-        temp = np.zeros((compOrder, int(Onset0 - self.ARorder - 1)))
+        temp = np.zeros((compOrder, int(Onset0 - self.order_AR - 1)))
         y_gamma = np.concatenate((temp, y), 1)
 
         return y_gamma
@@ -843,14 +884,14 @@ class ARXmodelfit(object):
         # Find AR coefficients
         err, b = self.arburg_(x)
         L_invt = copy(L_inv)
-        N = self.numSamp - self.ARorder
+        N = self.num_sample - self.order_AR
         # Transpose of L_invt matrix as per Levinson-Durbin recursion
-        for ar in range(self.ARorder):
+        for ar in range(self.order_AR):
             coef = b[ar]
             L_invt[:ar + 1, ar + 1] = coef
 
-        for ar in range(N - self.ARorder - 1):
-            L_invt[ar + 1:ar + self.ARorder + 1, ar + self.ARorder] = coef
+        for ar in range(N - self.order_AR - 1):
+            L_invt[ar + 1:ar + self.order_AR + 1, ar + self.order_AR] = coef
 
         # Apply Levinson-Durbin recursion to get the diagonal elements
         x_xcov = np.cov(x, bias=False, ddof=0)
@@ -859,20 +900,21 @@ class ARXmodelfit(object):
         q = err[-1]
         q_ = float(1) / q
         # Compute inverse covariance of AR(p) using Cholesky Form
-        A = L_invt[:self.ARorder + 1, :self.ARorder + 1]
-        B = L_invt[:self.ARorder + 1, self.ARorder + 1:self.numSamp]
-        C = L_invt[self.ARorder + 1:self.numSamp, self.ARorder + 1:self.numSamp]
+        A = L_invt[:self.order_AR + 1, :self.order_AR + 1]
+        B = L_invt[:self.order_AR + 1, self.order_AR + 1:self.num_sample]
+        C = L_invt[self.order_AR + 1:self.num_sample,
+            self.order_AR + 1:self.num_sample]
         D = np.diag(d_inv[:, 0])
         AD = np.matmul(A, D)
         w_inv = copy(w_inv)
-        w_inv[:self.ARorder + 1, :self.ARorder + 1] = \
+        w_inv[:self.order_AR + 1, :self.order_AR + 1] = \
             np.matmul(AD, A.T) + q_ * np.matmul(B, B.T)
-        w_inv[:self.ARorder + 1,
-        self.ARorder + 1:self.numSamp] = q_ * np.matmul(B, C.T)
-        w_inv[self.ARorder + 1:self.numSamp,
-        :self.ARorder + 1] = q_ * np.matmul(C, B.T)
-        w_inv[self.ARorder + 1:self.numSamp,
-        self.ARorder + 1:self.numSamp] = q_ * np.matmul(C, C.T)
+        w_inv[:self.order_AR + 1,
+        self.order_AR + 1:self.num_sample] = q_ * np.matmul(B, C.T)
+        w_inv[self.order_AR + 1:self.num_sample,
+        :self.order_AR + 1] = q_ * np.matmul(C, B.T)
+        w_inv[self.order_AR + 1:self.num_sample,
+        self.order_AR + 1:self.num_sample] = q_ * np.matmul(C, C.T)
 
         return w_inv, d_vec, q
 
@@ -888,12 +930,12 @@ class ARXmodelfit(object):
                 log_score: loglikelihood scores(s)
         """
         # Initialization
-        N = self.numSamp - self.ARorder
+        N = self.num_sample - self.order_AR
         Ix = np.identity(N)
-        z = np.zeros((np.sum(self.compOrder), self.numSamp - self.ARorder))
+        z = np.zeros((np.sum(self.compOrder), self.num_sample - self.order_AR))
         log_score = np.zeros((y.shape[0]))
-        nParam = [self.ARorder, self.ARorder + sum(self.compOrder),
-                          self.ARorder + sum(self.compOrder) + 1]
+        nParam = [self.order_AR, self.order_AR + sum(self.compOrder),
+                  self.order_AR + sum(self.compOrder) + 1]
         # VEP components
         vep = np.zeros((self.compOrder[0], N))
         for trial in range(self.numTrial):
@@ -916,10 +958,10 @@ class ARXmodelfit(object):
                 # estimated VEP & FRP terms
                 sig_hat = np.matmul(z.T, beta)
                 # AR series - is this ar_hat + res_hat
-                arProcess_hat = y[ch, self.ARorder:] - sig_hat
+                arProcess_hat = y[ch, self.order_AR:] - sig_hat
                 Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
-                                                              arProcess_hat))
+                                                             arProcess_hat))
                 logdG = np.sum(np.log(D)) + N * np.log(sigma_hat + eps)
                 log_score[ch] = logdG + error / (sigma_hat + eps)
 
@@ -944,16 +986,16 @@ class ARXmodelfit(object):
                 # estimated VEP & ERP terms
                 sig_hat = np.matmul(z.T, beta)
                 # AR series - is this ar_hat + res_hat
-                arProcess_hat = y[ch, self.ARorder:] - sig_hat
+                arProcess_hat = y[ch, self.order_AR:] - sig_hat
                 Q_inv, D, _ = self.invCov(arProcess_hat, Ix, Ix)
                 error = np.matmul(arProcess_hat.T, np.matmul(Q_inv,
-                                                              arProcess_hat))
+                                                             arProcess_hat))
                 logdG = np.sum(np.log(D)) + N * np.log(sigma_hat + eps)
                 log_score[ch] = logdG + error / (sigma_hat + eps)
 
         return log_score
 
-    def multiChanenelCoeff(self, scores, label, nFold = 10):
+    def multiChanenelCoeff(self, scores, label, nFold=10):
         """
             Takes scores from ch number of channel or brain sources and N number
             of trials and compute the coefficients of Lasso Logistic Regression.
@@ -975,27 +1017,27 @@ class ARXmodelfit(object):
         # Shuffling scores
         n = scores.shape[0]
         indx = np.random.permutation(n)
-        score_sh = scores[indx,:]
+        score_sh = scores[indx, :]
         label_sh = label[indx]
-        k = [i*.01 for i in range(100)]
+        k = [i * .01 for i in range(100)]
         k = k + [2., 5., 10.]
         # Fold creation
-        stp = int(np.floor(n/nFold))
+        stp = int(np.floor(n / nFold))
 
         for j in k:
             auc = []
             for i in range(nFold):
                 dummy_score = score_sh
                 dummy_label = label_sh
-                if i==nFold:
-                    indx = [q for q in range(i*stp,n)]
-                    score_test = dummy_score[indx,:]
+                if i == nFold:
+                    indx = [q for q in range(i * stp, n)]
+                    score_test = dummy_score[indx, :]
                     label_test = dummy_label[indx]
                     np.delete(dummy_score, indx, 0)
                     np.delete(dummy_label, indx, 0)
                 else:
-                    indx = [q for q in range(i*stp,(i+1)*stp)]
-                    score_test = dummy_score[indx,:]
+                    indx = [q for q in range(i * stp, (i + 1) * stp)]
+                    score_test = dummy_score[indx, :]
                     label_test = dummy_label[indx]
                     np.delete(dummy_score, indx, 0)
                     np.delete(dummy_label, indx, 0)
@@ -1016,7 +1058,7 @@ class ARXmodelfit(object):
             auc_mean.append(np.mean(auc_))
             auc_std.append(np.std(auc_))
         # Find the best regularization parameter (hyperparamter)
-        indx = [q for q in range(len(k)) if auc_mean[q]==max(auc_mean)]
+        indx = [q for q in range(len(k)) if auc_mean[q] == max(auc_mean)]
         alp = k[indx[0]]
         # Apply again ridge regression with the learned hyperparamter
         coeff = []
@@ -1052,11 +1094,11 @@ class ARXmodelfit(object):
         N = float(x.shape[0])
         a = [[1]]
         err = np.sum(x * x) / N
-        k = np.zeros((self.ARorder, 1))
+        k = np.zeros((self.order_AR, 1))
         efp = x[1:]
         ebp = x[:-1]
         # Burg algorithm recursions
-        for ar in range(self.ARorder):
+        for ar in range(self.order_AR):
             # Calculate the next order reflection (parcor) coefficient
             num = float(-2) * np.sum(ebp * efp)
             den = np.sum(efp * efp) + np.sum(ebp * ebp)
@@ -1092,12 +1134,12 @@ class ARXmodelfit(object):
         eb = x
         b = []
         a = [[1]]
-        err = np.zeros((self.ARorder + 1, 1))
+        err = np.zeros((self.order_AR + 1, 1))
         err[0] = np.sum(x * x) / N
-        k = np.zeros((self.ARorder, 1))
+        k = np.zeros((self.order_AR, 1))
 
         # Burg algorithm recursions
-        for ar in range(self.ARorder):
+        for ar in range(self.order_AR):
             # Calculate the next order reflection (parcor) coefficient
             efp = ef[1:]
             ebp = eb[:-1]
@@ -1141,7 +1183,7 @@ class ARXmodelfit(object):
         fpr, tpr, _ = metrics.roc_curve(labels, scores, pos_label=1)
         fnr, tnr, _ = metrics.roc_curve(labels, scores, pos_label=0)
         auc = metrics.auc(fpr, tpr)
-        acc = (np.sum(tpr) + np.sum(tnr))/len(labels)
+        acc = (np.sum(tpr) + np.sum(tnr)) / len(labels)
         sensitivity = np.sum(tpr) / len(labels[labels > 0])
         specificity = np.sum(tnr) / len(labels[labels == 0])
 
@@ -1161,13 +1203,12 @@ class ARXmodelfit(object):
         numSamp = scores.shape[1]
         # Predicting labels according to the scores
         for s in range(numSamp):
-            sc = scores[:,s]
-            indx = [i for i in range(self.numTrial+1) if sc[i] == min(sc)]
-            sc = np.zeros(self.numTrial+1)
+            sc = scores[:, s]
+            indx = [i for i in range(self.numTrial + 1) if sc[i] == min(sc)]
+            sc = np.zeros(self.numTrial + 1)
             sc[indx[0]] = 1
-            err_sum += np.sum(np.abs(sc - labels[:,s]))
+            err_sum += np.sum(np.abs(sc - labels[:, s]))
 
-        acc = 1 - err_sum/(numSamp*(self.numTrial+1))
+        acc = 1 - err_sum / (numSamp * (self.numTrial + 1))
 
         return acc
-
