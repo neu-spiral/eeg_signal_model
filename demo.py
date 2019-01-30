@@ -93,8 +93,8 @@ if mode == "simulator":
     hyperparameter = model_dic["hyperparameters"]
     stimOnset = tmp['us']
     targetOnset = tmp['ue']
-    modelObj = ARXModel(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                        numSeq=numSeq, numSamp=numSam, channels=channels,
+    modelObj = ARXModel(fs=fs, paradigm=paradigm, num_trial=numTrial,
+                        num_seq=numSeq, numSamp=numSam, channels=channels,
                         hyperparameter=hyperparameter, orderSelection=False)
     syn_data = modelObj.syntheticEEGseq(parameters, stimOnset, targetOnset)
     mean_resp_visualization(syn_data, fs, paradigm, mode, fig_dir, userID)
@@ -109,8 +109,8 @@ elif mode == "modelfitting":
     mean_resp_visualization(data, fs, paradigm, mode, fig_dir, userID)
     # set a range of hyperparameters for grid search
     hyperparameter = tmp['hyperparameters']
-    modelObj = ARXModel(fs=fs, paradigm=paradigm, numTrial=numTrial,
-                        numSeq=numSeq, numSamp=numSam, channels=channels,
+    modelObj = ARXModel(fs=fs, paradigm=paradigm, num_trial=numTrial,
+                        num_seq=numSeq, numSamp=numSam, channels=channels,
                         hyperparameter=hyperparameter, orderSelection=True)
     auc, acc, parameters, hyperParam = modelObj.ARXmodelfit(data=data,
                                                             nFold=nFold)
